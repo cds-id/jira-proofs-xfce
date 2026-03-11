@@ -26,5 +26,9 @@
 #include "screenshooter-capture.h"
 #include "screenshooter-format.h"
 #include "screenshooter-global.h"
+#include "screenshooter-cloud-config.h"
+#include "screenshooter-r2.h"
+#include "screenshooter-jira.h"
+#include "screenshooter-jira-dialog.h"
 
 #endif
