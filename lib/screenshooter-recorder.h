@@ -26,4 +26,6 @@ gchar         *screenshooter_recorder_stop      (RecorderState  *state,
 
 void           screenshooter_recorder_free      (RecorderState *state);
 
+void           screenshooter_recorder_cleanup   (void);
+
 #endif

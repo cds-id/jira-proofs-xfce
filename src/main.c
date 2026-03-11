@@ -194,6 +194,8 @@ int main (int argc, char **argv)
         }
     }
 
+  atexit (screenshooter_recorder_cleanup);
+
   /* Exit if two region options were given */
   if (window && fullscreen)
     {

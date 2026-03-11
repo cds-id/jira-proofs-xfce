@@ -7,6 +7,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <glib/gstdio.h>
+
+static RecorderState *active_recorder = NULL;
 
 
 gboolean
@@ -114,6 +117,7 @@ screenshooter_recorder_start (gint region, gint x, gint y, gint w, gint h,
     }
 
   state->pid = pid;
+  active_recorder = state;
   return state;
 }
 
@@ -172,6 +176,24 @@ screenshooter_recorder_free (RecorderState *state)
   if (state == NULL)
     return;
 
+  if (active_recorder == state)
+    active_recorder = NULL;
+
   g_free (state->output_path);
   g_free (state);
+}
+
+
+void
+screenshooter_recorder_cleanup (void)
+{
+  if (active_recorder == NULL || active_recorder->stopped)
+    return;
+
+  active_recorder->stopped = TRUE;
+  kill (active_recorder->pid, SIGINT);
+  waitpid (active_recorder->pid, NULL, 0);
+
+  if (active_recorder->output_path)
+    g_unlink (active_recorder->output_path);
 }
