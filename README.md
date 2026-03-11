@@ -1,16 +1,17 @@
 # jira-proofs-xfce
 
-Fork of [xfce4-screenshooter](https://gitlab.xfce.org/apps/xfce4-screenshooter) with native **Cloudflare R2 upload** and **Jira integration**.
+Fork of [xfce4-screenshooter](https://gitlab.xfce.org/apps/xfce4-screenshooter) with native **Cloudflare R2 upload**, **Jira integration**, and **video screen recording**.
 
-Capture screenshots and automatically upload them to R2, then post as comments on Jira issues — all from the native XFCE screenshot tool.
+Capture screenshots or record videos and automatically upload them to R2, then post as comments on Jira issues — all from the native XFCE screenshot tool.
 
 ## Features
 
 Everything from the original xfce4-screenshooter, plus:
 
-- **Upload to Cloudflare R2** — S3-compatible upload with AWS Signature V4
-- **Post to Jira** — Search issues, pick a preset, and post screenshots as ADF comments with embedded images
-- **CLI support** — `--upload-r2` / `-u` and `--jira` / `-j ISSUE_KEY` flags
+- **Video Screen Recording** — Record fullscreen, active window, or selected region via FFmpeg (MP4/H.264, 30fps)
+- **Upload to Cloudflare R2** — S3-compatible upload with AWS Signature V4 (images and videos)
+- **Post to Jira** — Search issues, pick a preset, and post screenshots/recordings as ADF comments with embedded media
+- **CLI support** — `--upload-r2` / `-u`, `--jira` / `-j ISSUE_KEY`, `--record-fullscreen`, `--record-window`, `--record-region`
 - **Composable actions** — Cloud actions work alongside save, clipboard, open, and custom actions
 - **Config file** — `~/.config/xfce4-screenshooter/cloud.toml`
 
@@ -66,9 +67,9 @@ sudo apt-get install -f
 
 ### GUI
 
-Run `xfce4-screenshooter`. The actions dialog now has a **Cloud** section with checkboxes for "Upload to Cloudflare R2" and "Post to Jira issue".
+Run `xfce4-screenshooter`. The region dialog has a "Record Video" checkbox. The actions dialog includes options for "Upload to R2" and "Post to Jira".
 
-### CLI
+### CLI — Screenshots
 
 ```bash
 # Fullscreen screenshot + upload to R2
@@ -79,6 +80,24 @@ xfce4-screenshooter -r -s ~/Pictures/ -u
 
 # Fullscreen + post to specific Jira issue (auto-uploads to R2)
 xfce4-screenshooter -f -j BNS-2727
+```
+
+### CLI — Video Recording
+
+Requires FFmpeg (`sudo apt install ffmpeg`). X11 only.
+
+```bash
+# Record fullscreen (stop with the floating button or Escape)
+xfce4-screenshooter --record-fullscreen
+
+# Record active window + upload to R2
+xfce4-screenshooter --record-window -u
+
+# Record selected region + post to Jira
+xfce4-screenshooter --record-region -j BNS-2727
+
+# Record fullscreen + save to directory
+xfce4-screenshooter --record-fullscreen -s ~/Videos/
 ```
 
 ## Credits
@@ -95,7 +114,7 @@ This is a fork of **xfce4-screenshooter** originally developed by the XFCE proje
 **Original contributors:**
 - David Collins, Enrico Troger, Mike Massonnet, Fabrice Viale, Sam Swift, Tom Hope
 
-The cloud integration (R2 + Jira) was added by [CDS](https://github.com/cds-id), ported from [jira-proofs](https://github.com/cds-id/jira-proofs) (Tauri/Rust).
+The cloud integration (R2 + Jira) and video recording were added by [CDS](https://github.com/cds-id), ported from [jira-proofs](https://github.com/cds-id/jira-proofs) (Tauri/Rust).
 
 ## License
 
