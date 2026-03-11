@@ -40,6 +40,8 @@ else
 endif
 xfconf = dependency('libxfconf-0', version: dependency_versions['xfce4'])
 libxfce4panel = dependency('libxfce4panel-2.0', version: dependency_versions['xfce4'])
+libcurl = dependency('libcurl', version: '>= 7.68.0')
+json_glib = dependency('json-glib-1.0', version: '>= 1.4.0')
 
 # Feature: 'x11'
 libx11 = dependency('x11', version: dependency_versions['libx11'], required: get_option('x11'))

@@ -63,6 +63,8 @@ libscreenshooter = static_library(
     x11_deps,
     wayland_deps,
     xfixes,
+    libcurl,
+    json_glib,
   ],
   install: false,
 )
