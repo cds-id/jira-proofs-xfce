@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson ninja-build gcc pkg-config \
+            libglib2.0-dev libgtk-3-dev \
+            libxfce4util-dev libxfce4ui-2-dev \
+            libxfconf-0-dev libxfce4panel-2.0-dev \
+            libexo-2-dev \
+            libx11-dev libxi-dev libxext-dev libxfixes-dev \
+            libcurl4-openssl-dev libjson-glib-dev \
+            dpkg-dev debhelper fakeroot
+
+      - name: Configure
+        run: meson setup build --prefix=/usr -Dwayland=disabled
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Install to staging
+        run: DESTDIR=${{ github.workspace }}/pkg meson install -C build
+
+      - name: Create tarball
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          tar -czf jira-proofs-xfce-${VERSION}-linux-amd64.tar.gz -C pkg .
+
+      - name: Create .deb package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          PKG_DIR="${{ github.workspace }}/deb-pkg"
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          cp -r pkg/* "${PKG_DIR}/"
+          cat > "${PKG_DIR}/DEBIAN/control" << CTRL
+          Package: jira-proofs-xfce
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-3-0, libglib2.0-0, libxfce4util-1.0, libxfce4ui-2-0, libxfconf-0-3, libxfce4panel-2.0-4, libcurl4, libjson-glib-1.0-0
+          Maintainer: CDS <dev@cds-id.com>
+          Description: Xfce4 screenshooter with Jira and Cloudflare R2 integration
+           Fork of xfce4-screenshooter with native support for uploading
+           screenshots to Cloudflare R2 and posting them as comments on
+           Jira issues.
+          CTRL
+          sed -i 's/^          //' "${PKG_DIR}/DEBIAN/control"
+          dpkg-deb --build "${PKG_DIR}" "jira-proofs-xfce-${VERSION}-amd64.deb"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            jira-proofs-xfce-*-linux-amd64.tar.gz
+            jira-proofs-xfce-*-amd64.deb
+          generate_release_notes: true
