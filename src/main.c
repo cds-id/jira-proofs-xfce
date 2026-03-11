@@ -33,6 +33,8 @@ gboolean no_border = FALSE;
 gboolean supported_formats = FALSE;
 gboolean clipboard = FALSE;
 gboolean show_in_folder = FALSE;
+gboolean upload_r2 = FALSE;
+gchar *jira_issue = NULL;
 gchar *screenshot_dir = NULL;
 gchar *application = NULL;
 gint delay = 0;
@@ -102,6 +104,16 @@ static GOptionEntry entries[] =
   {
     "supported-formats", 0, G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE, &supported_formats,
     N_("Lists supported image formats, results can vary depending on installed pixbuf loaders"),
+    NULL
+  },
+  {
+    "upload-r2", 'u', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE, &upload_r2,
+    N_("Upload the screenshot to Cloudflare R2"),
+    NULL
+  },
+  {
+    "jira", 'j', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_STRING, &jira_issue,
+    N_("Post to Jira issue (provide issue key, e.g. PROJ-123)"),
     NULL
   },
   {
@@ -292,6 +304,24 @@ int main (int argc, char **argv)
           sd->action_specified = TRUE;
         }
 
+      if (upload_r2)
+        {
+          if (!sd->action_specified)
+            sd->action = NONE;
+          sd->action |= UPLOAD_R2;
+          sd->action_specified = TRUE;
+        }
+
+      if (jira_issue != NULL)
+        {
+          if (!sd->action_specified)
+            sd->action = NONE;
+          sd->action |= POST_JIRA;
+          sd->action_specified = TRUE;
+          sd->action |= UPLOAD_R2;
+          sd->jira_issue_key = g_strdup (jira_issue);
+        }
+
       if (!sd->app)
         sd->app = g_strdup ("none");
 
@@ -331,6 +361,8 @@ int main (int argc, char **argv)
   g_free (sd->custom_action_command);
   g_free (sd->last_user);
   g_free (sd->last_extension);
+  g_free (sd->jira_issue_key);
+  g_free (jira_issue);
   g_free (sd);
 
   TRACE ("Ciao");
