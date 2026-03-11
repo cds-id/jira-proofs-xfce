@@ -27,6 +27,14 @@ libscreenshooter_sources = [
   'screenshooter-recorder.h',
   'screenshooter-recorder-dialog.c',
   'screenshooter-recorder-dialog.h',
+  'screenshooter-video-editor.c',
+  'screenshooter-video-editor.h',
+  'screenshooter-video-editor-blur.c',
+  'screenshooter-video-editor-blur.h',
+  'screenshooter-video-editor-canvas.c',
+  'screenshooter-video-editor-canvas.h',
+  'screenshooter-video-editor-timeline.c',
+  'screenshooter-video-editor-timeline.h',
 ]
 
 libscreenshooter_sources += gnome.genmarshal(
@@ -77,6 +85,7 @@ libscreenshooter = static_library(
     xfixes,
     libcurl,
     json_glib,
+    libm,
   ],
   install: false,
 )

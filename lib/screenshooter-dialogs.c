@@ -23,6 +23,7 @@
 #include "screenshooter-format.h"
 #include "screenshooter-cloud-config.h"
 #include "screenshooter-recorder.h"
+#include "screenshooter-video-editor.h"
 
 #include <libxfce4ui/libxfce4ui.h>
 
@@ -1175,6 +1176,13 @@ cb_post_jira_toggled (GtkToggleButton *tb, ScreenshotData *sd)
     sd->action = POST_JIRA | UPLOAD_R2;
 }
 
+
+static void
+cb_edit_video_clicked (GtkButton *button, GtkWidget *dlg)
+{
+  screenshooter_video_editor_run (GTK_WINDOW (dlg));
+}
+
 GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
 {
   GtkWidget *dlg, *grid, *box, *evbox, *label, *radio, *checkbox;
@@ -1422,6 +1430,20 @@ GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
 
   /* Run the callback functions to grey/ungrey the correct widgets */
   cb_toggle_set_sensi (GTK_TOGGLE_BUTTON (radio), combobox);
+
+  /* Edit Video button */
+  {
+    GtkWidget *edit_video_btn = gtk_button_new_with_label (_("Edit Video..."));
+    gtk_widget_set_tooltip_text (edit_video_btn,
+      _("Open a video file to add blur regions and export"));
+    gtk_widget_set_sensitive (edit_video_btn,
+                              screenshooter_video_editor_available ());
+    g_signal_connect (edit_video_btn, "clicked",
+                      G_CALLBACK (cb_edit_video_clicked), dlg);
+    gtk_widget_set_halign (edit_video_btn, GTK_ALIGN_START);
+    gtk_widget_set_margin_top (edit_video_btn, 6);
+    gtk_box_pack_start (GTK_BOX (box), edit_video_btn, FALSE, FALSE, 0);
+  }
 
   /* Preview box */
   box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);

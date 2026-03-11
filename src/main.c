@@ -38,6 +38,8 @@ gchar *jira_issue = NULL;
 gboolean record_fullscreen = FALSE;
 gboolean record_window = FALSE;
 gboolean record_region = FALSE;
+gboolean edit_video = FALSE;
+gchar *edit_video_path = NULL;
 gchar *screenshot_dir = NULL;
 gchar *application = NULL;
 gint delay = 0;
@@ -135,6 +137,12 @@ static GOptionEntry entries[] =
     "record-region", 0, G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
     &record_region,
     N_("Record a video of a selected region"),
+    NULL
+  },
+  {
+    "edit-video", 'e', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
+    &edit_video,
+    N_("Open the video blur editor (use with a file path argument)"),
     NULL
   },
   {
@@ -303,6 +311,44 @@ int main (int argc, char **argv)
 
   /* Default to no action specified */
   sd->action_specified = FALSE;
+
+  /* Edit video mode: launch editor directly */
+  if (edit_video)
+    {
+      if (!screenshooter_video_editor_available ())
+        {
+          g_printerr (_("FFmpeg and ffprobe are required for video editing.\n"
+                        "Install with: sudo apt install ffmpeg\n"));
+          g_free (sd);
+          return EXIT_FAILURE;
+        }
+
+      /* Check for a file path as remaining argument */
+      if (argc > 1)
+        edit_video_path = argv[1];
+
+      if (edit_video_path != NULL)
+        {
+          if (g_file_test (edit_video_path, G_FILE_TEST_EXISTS))
+            {
+              screenshooter_video_editor_run_with_file (edit_video_path);
+            }
+          else
+            {
+              g_printerr (_("File not found: %s\n"), edit_video_path);
+              g_free (sd);
+              return EXIT_FAILURE;
+            }
+        }
+      else
+        {
+          screenshooter_video_editor_run (NULL);
+        }
+
+      gtk_main ();
+      g_free (sd);
+      return EXIT_SUCCESS;
+    }
 
   /* If a region cli option is given, take the screenshot accordingly.*/
   if (fullscreen || window || region)
