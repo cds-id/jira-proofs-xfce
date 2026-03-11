@@ -7,7 +7,7 @@ Add a standalone video editor to xfce4-screenshooter that allows users to open a
 ## Entry Point
 
 A new "Edit Video" button in the main screenshooter dialog's action area (alongside existing Save/Upload actions). Clicking it:
-1. Checks FFmpeg/ffprobe availability (extends `screenshooter_recorder_is_available()`)
+1. Checks FFmpeg/ffprobe availability (extends `screenshooter_recorder_available()`)
 2. Opens a file chooser filtered to `*.mp4`
 3. Extracts video metadata (duration, resolution, fps) via ffprobe
 4. Launches the editor window
@@ -122,12 +122,11 @@ ffprobe -v quiet -print_format json -show_streams -show_format input.mp4
 ```
 
 Parse from JSON:
-- `streams[0].width`, `streams[0].height` for resolution
-- `streams[0].r_frame_rate` for fps
+- Find first stream where `codec_type == "video"`, read its `width`, `height`, `r_frame_rate`
 - `format.duration` for duration
 - Check if any stream has `codec_type == "audio"` to set `has_audio`
 
-Requires extending `screenshooter_recorder_is_available()` to also check for `ffprobe` in PATH.
+Requires extending `screenshooter_recorder_available()` to also check for `ffprobe` in PATH.
 
 ### Frame Extraction (on scrub)
 
@@ -135,13 +134,13 @@ Requires extending `screenshooter_recorder_is_available()` to also check for `ff
 ffmpeg -ss <timestamp> -i input.mp4 -frames:v 1 /tmp/xfce-preview-XXXXXX.png
 ```
 
-Use a temp file (consistent with existing `build_output_path()` pattern in `screenshooter-recorder.c`) and load with `gdk_pixbuf_new_from_file()`. Delete temp file after loading.
+Use a fixed temp file path (`xfce-screenshooter-preview.png` in `g_get_tmp_dir()`) since only one preview exists at a time. Load with `gdk_pixbuf_new_from_file()`. Overwritten on each extraction.
 
-Extraction runs via `g_spawn_async()` with a `g_child_watch_add()` callback that loads the pixbuf and updates the canvas on the main loop. This prevents blocking the UI.
+Extraction runs via `g_spawn_async()` with a `g_child_watch_add()` callback that loads the pixbuf and updates the canvas on the main loop. Call `g_spawn_close_pid()` in the child watch callback. This prevents blocking the UI.
 
 Note: `-ss` before `-i` uses input seeking (fast, keyframe-accurate). For screen recordings this is acceptable; frame-exact seeking is not critical for preview.
 
-Debounce: on slider `value-changed`, reset a 200ms `g_timeout_add()`. Only trigger extraction when the timeout fires (user stopped dragging).
+Debounce: on slider `value-changed`, cancel any pending timeout via `g_source_remove()` on the stored source ID, then add a new 200ms `g_timeout_add()`. Only trigger extraction when the timeout fires (user stopped dragging). Store the source ID to avoid queuing multiple callbacks.
 
 ### Blur Filter Chain (on Apply)
 
@@ -159,7 +158,7 @@ ffmpeg -i input.mp4 -filter_complex "
   [base][r0]overlay=X0:Y0:enable='between(t,S0,E0)'[t0];
   [t0][r1]overlay=X1:Y1:enable='between(t,S1,E1)'[t1];
   ...
-" -map "[tN-1]" -map 0:a? -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p -c:a copy output.mp4
+" -map "[tN-1]" -map 0:a? -y -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p -c:a copy output.mp4
 ```
 
 Where:
@@ -168,18 +167,11 @@ Where:
 - `Si,Ei` = region start/end time in seconds
 - `-map 0:a?` conditionally maps audio (the `?` makes it optional, no error if no audio)
 
-**Single region (simplified, uses `-vf` instead of `-filter_complex`):**
-```
-ffmpeg -i input.mp4 -vf "
-  split[base][blur1];
-  [blur1]crop=W:H:X:Y,boxblur=R[blurred1];
-  [base][blurred1]overlay=X:Y:enable='between(t,S,E)'
-" -map 0:a? -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p -c:a copy output.mp4
-```
+Use the same `-filter_complex` approach for all region counts (N=1 through N=10) to keep a single code path. The filter chain builder always generates the general form above.
 
-**Full-frame blur:**
+**Full-frame blur (special case, uses `-vf`):**
 ```
-ffmpeg -i input.mp4 -vf "boxblur=R:enable='between(t,S,E)'" -map 0:a? -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p -c:a copy output.mp4
+ffmpeg -y -i input.mp4 -vf "boxblur=R:enable='between(t,S,E)'" -map 0:a? -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p -c:a copy output.mp4
 ```
 
 **Re-encoding parameters** (matching existing recorder settings in `screenshooter-recorder.c`):
@@ -189,12 +181,12 @@ ffmpeg -i input.mp4 -vf "boxblur=R:enable='between(t,S,E)'" -map 0:a? -c:v libx2
 
 ### Progress Tracking
 
-Use FFmpeg's `-progress pipe:2` flag to get machine-readable progress on stderr:
+Use FFmpeg's `-progress pipe:1` flag to get machine-readable progress on stdout:
 ```
 out_time_ms=15000000
 ```
 
-Parse `out_time_ms` values, divide by total duration to compute percentage. Update progress bar via `g_io_watch` on the stderr fd. Spawn FFmpeg with `g_spawn_async_with_pipes()` to capture stderr.
+Parse `out_time_ms` values from stdout, divide by total duration to compute percentage. Update progress bar via `g_io_add_watch()` on the stdout fd. Spawn FFmpeg with `g_spawn_async_with_pipes()` to capture both stdout (progress) and stderr (errors). Capture stderr separately for error reporting on failure.
 
 ## Error Handling
 
