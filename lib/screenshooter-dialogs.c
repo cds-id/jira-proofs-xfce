@@ -22,6 +22,7 @@
 #include "screenshooter-custom-actions.h"
 #include "screenshooter-format.h"
 #include "screenshooter-cloud-config.h"
+#include "screenshooter-recorder.h"
 
 #include <libxfce4ui/libxfce4ui.h>
 
@@ -119,6 +120,9 @@ cb_custom_action_add               (GtkToolButton      *button,
 static void
 cb_custom_action_delete            (GtkToolButton      *button,
                                     gpointer            user_data);
+static void
+cb_record_toggled                  (GtkToggleButton    *tb,
+                                    ScreenshotData     *sd);
 
 
 
@@ -996,6 +1000,41 @@ GtkWidget *screenshooter_region_dialog_new (ScreenshotData *sd, gboolean plugin)
                     G_CALLBACK (cb_radiobutton_activate), dlg);
   gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (rectangle_button), (sd->region == SELECT));
 
+  /* Record Video checkbox */
+  {
+    GtkWidget *record_check = gtk_check_button_new_with_label (
+      _("Record Video"));
+    gboolean ffmpeg_available = screenshooter_recorder_available ();
+    gboolean is_wayland = FALSE;
+
+#ifdef ENABLE_WAYLAND
+    {
+      GdkDisplay *disp = gdk_display_get_default ();
+      is_wayland = GDK_IS_WAYLAND_DISPLAY (disp);
+    }
+#endif
+
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (record_check),
+                                  sd->recording);
+    gtk_widget_set_sensitive (record_check,
+                              ffmpeg_available && !is_wayland);
+
+    if (!ffmpeg_available)
+      gtk_widget_set_tooltip_text (record_check,
+        _("FFmpeg is required for video recording. "
+          "Install with: sudo apt install ffmpeg"));
+    else if (is_wayland)
+      gtk_widget_set_tooltip_text (record_check,
+        _("Video recording is currently supported on X11 only."));
+    else
+      gtk_widget_set_tooltip_text (record_check,
+        _("Record a video instead of taking a screenshot"));
+
+    g_signal_connect (G_OBJECT (record_check), "toggled",
+      G_CALLBACK (cb_record_toggled), sd);
+    gtk_box_pack_start (GTK_BOX (box), record_check, FALSE, FALSE, 0);
+  }
+
   /* Create options label */
   label = gtk_label_new ("");
   gtk_label_set_markup (GTK_LABEL (label),
@@ -1110,6 +1149,14 @@ GtkWidget *screenshooter_region_dialog_new (ScreenshotData *sd, gboolean plugin)
     }
 
   return dlg;
+}
+
+
+
+static void
+cb_record_toggled (GtkToggleButton *tb, ScreenshotData *sd)
+{
+  sd->recording = gtk_toggle_button_get_active (tb);
 }
 
 
@@ -1235,6 +1282,8 @@ GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
       g_signal_connect (G_OBJECT (radio), "activate",
                         G_CALLBACK (cb_radiobutton_activate), dlg);
       gtk_grid_attach (GTK_GRID (actions_grid), radio, 0, 2, 1, 1);
+      if (sd->recording)
+        gtk_widget_set_sensitive (radio, FALSE);
     }
 
   /* Open with radio button */
@@ -1250,6 +1299,8 @@ GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
   gtk_widget_set_tooltip_text (radio,
                                _("Open the screenshot with the chosen application"));
   gtk_grid_attach (GTK_GRID (actions_grid), radio, 0, 3, 1, 1);
+  if (sd->recording)
+    gtk_widget_set_sensitive (radio, FALSE);
 
   /* Open with combobox */
   liststore = gtk_list_store_new (4, GDK_TYPE_PIXBUF, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_APP_INFO);
@@ -1291,6 +1342,8 @@ GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
       gtk_widget_set_tooltip_text (radio,
                                   _("Execute the selected custom action"));
       gtk_grid_attach (GTK_GRID (actions_grid), radio, 0, 4, 1, 1);
+      if (sd->recording)
+        gtk_widget_set_sensitive (radio, FALSE);
 
       /* Custom Actions combobox */
       combobox = gtk_combo_box_new_with_model (GTK_TREE_MODEL (liststore));
