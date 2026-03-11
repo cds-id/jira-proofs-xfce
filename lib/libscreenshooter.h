@@ -30,5 +30,7 @@
 #include "screenshooter-r2.h"
 #include "screenshooter-jira.h"
 #include "screenshooter-jira-dialog.h"
+#include "screenshooter-recorder.h"
+#include "screenshooter-recorder-dialog.h"
 
 #endif
