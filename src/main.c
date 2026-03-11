@@ -35,6 +35,9 @@ gboolean clipboard = FALSE;
 gboolean show_in_folder = FALSE;
 gboolean upload_r2 = FALSE;
 gchar *jira_issue = NULL;
+gboolean record_fullscreen = FALSE;
+gboolean record_window = FALSE;
+gboolean record_region = FALSE;
 gchar *screenshot_dir = NULL;
 gchar *application = NULL;
 gint delay = 0;
@@ -117,6 +120,24 @@ static GOptionEntry entries[] =
     NULL
   },
   {
+    "record-fullscreen", 0, G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
+    &record_fullscreen,
+    N_("Record a video of the entire screen"),
+    NULL
+  },
+  {
+    "record-window", 0, G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
+    &record_window,
+    N_("Record a video of the active window"),
+    NULL
+  },
+  {
+    "record-region", 0, G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
+    &record_region,
+    N_("Record a video of a selected region"),
+    NULL
+  },
+  {
     NULL, ' ', 0, 0, NULL,
     NULL,
     NULL
@@ -148,6 +169,7 @@ int main (int argc, char **argv)
   GError *cli_error = NULL;
   GFile *default_save_dir;
   gchar *rc_file;
+  gboolean any_record, any_screenshot;
   const gchar *conflict_error =
     _("Conflicting options: --%s and --%s cannot be used at the same time.\n");
   const gchar *ignore_error =
@@ -192,6 +214,26 @@ int main (int argc, char **argv)
       return EXIT_FAILURE;
     }
 
+  /* Check record flag conflicts */
+  any_record = record_fullscreen || record_window || record_region;
+  any_screenshot = fullscreen || window || region;
+
+  if (any_record && any_screenshot)
+    {
+      g_printerr (_("Conflicting options: screenshot and record flags "
+                     "cannot be used at the same time.\n"));
+      return EXIT_FAILURE;
+    }
+
+  if ((record_fullscreen && record_window) ||
+      (record_fullscreen && record_region) ||
+      (record_window && record_region))
+    {
+      g_printerr (_("Conflicting options: only one --record-* flag "
+                     "can be used at a time.\n"));
+      return EXIT_FAILURE;
+    }
+
   /* Exit if two actions options were given */
   if ((application != NULL) && (screenshot_dir != NULL))
     {
@@ -202,18 +244,18 @@ int main (int argc, char **argv)
 
   /* Warn that action options, mouse and delay will be ignored in
    * non-cli mode */
-  if ((application != NULL) && !(fullscreen || window || region))
+  if ((application != NULL) && !(fullscreen || window || region) && !any_record)
     g_printerr (ignore_error, "open");
-  if ((screenshot_dir != NULL)  && !(fullscreen || window || region ))
+  if ((screenshot_dir != NULL)  && !(fullscreen || window || region) && !any_record)
     {
       g_printerr (ignore_error, "save");
       screenshot_dir = NULL;
     }
-  if (clipboard && !(fullscreen || window || region))
+  if (clipboard && !(fullscreen || window || region) && !any_record)
     g_printerr (ignore_error, "clipboard");
-  if (delay && !(fullscreen || window || region))
+  if (delay && !(fullscreen || window || region) && !any_record)
     g_printerr (ignore_error, "delay");
-  if (mouse && !(fullscreen || window || region))
+  if (mouse && !(fullscreen || window || region) && !any_record)
     g_printerr (ignore_error, "mouse");
 
   /* Warn when dependent option is not present */
@@ -339,6 +381,45 @@ int main (int argc, char **argv)
 
           g_object_unref (default_save_dir);
           g_free (screenshot_dir);
+        }
+
+      screenshooter_take_screenshot (sd, TRUE);
+      gtk_main ();
+    }
+  else if (any_record)
+    {
+      sd->recording = TRUE;
+      sd->region_specified = TRUE;
+      sd->action_specified = FALSE;
+
+      if (record_window)
+        sd->region = ACTIVE_WINDOW;
+      else if (record_fullscreen)
+        sd->region = FULLSCREEN;
+      else
+        sd->region = SELECT;
+
+      if (upload_r2)
+        {
+          sd->action = UPLOAD_R2;
+          sd->action_specified = TRUE;
+        }
+
+      if (jira_issue != NULL)
+        {
+          sd->action |= POST_JIRA | UPLOAD_R2;
+          sd->action_specified = TRUE;
+          sd->jira_issue_key = g_strdup (jira_issue);
+        }
+
+      if (screenshot_dir != NULL)
+        {
+          sd->action |= SAVE;
+          sd->action_specified = TRUE;
+          GFile *save_dir = g_file_new_for_commandline_arg (screenshot_dir);
+          g_free (sd->screenshot_dir);
+          sd->screenshot_dir = g_file_get_uri (save_dir);
+          g_object_unref (save_dir);
         }
 
       screenshooter_take_screenshot (sd, TRUE);
