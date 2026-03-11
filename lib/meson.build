@@ -15,6 +15,8 @@ libscreenshooter_sources = [
   'screenshooter-select.h',
   'screenshooter-utils.c',
   'screenshooter-utils.h',
+  'screenshooter-cloud-config.c',
+  'screenshooter-cloud-config.h',
 ]
 
 libscreenshooter_sources += gnome.genmarshal(
