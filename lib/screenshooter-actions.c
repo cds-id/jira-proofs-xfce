@@ -24,6 +24,10 @@
 #include "screenshooter-global.h"
 #include "screenshooter-dialogs.h"
 #include "screenshooter-format.h"
+#include "screenshooter-cloud-config.h"
+#include "screenshooter-r2.h"
+#include "screenshooter-jira.h"
+#include "screenshooter-jira-dialog.h"
 
 
 
@@ -154,6 +158,110 @@ action_idle (gpointer user_data)
             {
               screenshooter_custom_action_execute (save_location, sd->custom_action_name, sd->custom_action_command);
             }
+        }
+    }
+
+  /* Cloud actions */
+  if (sd->action & (UPLOAD_R2 | POST_JIRA))
+    {
+      GError *cloud_error = NULL;
+      CloudConfig *cloud_config = screenshooter_cloud_config_load (&cloud_error);
+
+      if (cloud_config == NULL)
+        {
+          g_warning ("Cloud config error: %s",
+                     cloud_error ? cloud_error->message : "unknown");
+          g_clear_error (&cloud_error);
+        }
+      else
+        {
+          gchar *public_url = NULL;
+
+          if (sd->action & UPLOAD_R2)
+            {
+              const gchar *upload_path = save_location;
+              gchar *temp_path = NULL;
+
+              if (upload_path == NULL)
+                {
+                  GFile *temp_dir = g_file_new_for_path (g_get_tmp_dir ());
+                  gchar *temp_dir_uri = g_file_get_uri (temp_dir);
+                  gchar *filename = screenshooter_get_filename_for_uri (
+                    temp_dir_uri, sd->title, sd->last_extension, sd->timestamp);
+                  gchar *temp_uri = screenshooter_save_screenshot (
+                    sd->screenshot, temp_dir_uri, filename,
+                    sd->last_extension, FALSE, FALSE);
+                  if (temp_uri)
+                    {
+                      GFile *f = g_file_new_for_uri (temp_uri);
+                      temp_path = g_file_get_path (f);
+                      g_object_unref (f);
+                      g_free (temp_uri);
+                    }
+                  g_object_unref (temp_dir);
+                  g_free (temp_dir_uri);
+                  g_free (filename);
+                  upload_path = temp_path;
+                }
+              else
+                {
+                  GFile *f = g_file_new_for_uri (upload_path);
+                  temp_path = g_file_get_path (f);
+                  g_object_unref (f);
+                  upload_path = temp_path;
+                }
+
+              if (upload_path)
+                {
+                  public_url = screenshooter_r2_upload (cloud_config,
+                    upload_path, NULL, NULL, &cloud_error);
+                  if (cloud_error)
+                    {
+                      g_warning ("R2 upload error: %s", cloud_error->message);
+                      g_clear_error (&cloud_error);
+                    }
+                }
+
+              g_free (temp_path);
+            }
+
+          if (sd->action & POST_JIRA)
+            {
+              if (public_url)
+                {
+                  if (sd->jira_issue_key && sd->jira_issue_key[0] != '\0')
+                    {
+                      GError *jira_err = NULL;
+                      screenshooter_jira_post_comment (cloud_config,
+                        sd->jira_issue_key,
+                        cloud_config->presets.bug_evidence
+                          ? cloud_config->presets.bug_evidence : "Screenshot",
+                        "", public_url, &jira_err);
+                      if (jira_err)
+                        {
+                          g_warning ("Jira post error: %s", jira_err->message);
+                          g_error_free (jira_err);
+                        }
+                    }
+                  else
+                    {
+                      screenshooter_jira_dialog_run (NULL, cloud_config,
+                                                      public_url);
+                    }
+                }
+              else
+                {
+                  GtkWidget *warn = gtk_message_dialog_new (NULL,
+                    GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING, GTK_BUTTONS_OK,
+                    "No image URL available. Enable 'Upload to R2' to "
+                    "post screenshots to Jira.");
+                  gtk_dialog_run (GTK_DIALOG (warn));
+                  gtk_widget_destroy (warn);
+                }
+            }
+
+          g_free (public_url);
+          screenshooter_cloud_config_free (cloud_config);
         }
     }
 

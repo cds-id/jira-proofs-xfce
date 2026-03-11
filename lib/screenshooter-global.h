@@ -32,6 +32,8 @@ enum {
   CLIPBOARD = 2,
   OPEN = 4,
   CUSTOM_ACTION = 8,
+  UPLOAD_R2 = 16,
+  POST_JIRA = 32,
 };
 
 
@@ -63,6 +65,7 @@ typedef struct
   GAppInfo *app_info;
   gchar *last_user;
   gchar *last_extension;
+  gchar *jira_issue_key;
   GdkPixbuf *screenshot;
   ScreenshotFinalizeCallback finalize_callback;
   gpointer finalize_callback_data;
