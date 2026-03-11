@@ -221,7 +221,13 @@ screenshooter_r2_upload (const CloudConfig *config,
   curl_easy_setopt (curl, CURLOPT_POSTFIELDS, file_contents);
   curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE, (long) file_len);
   curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt (curl, CURLOPT_TIMEOUT, 30L);
+  {
+    const gchar *ct = screenshooter_r2_content_type (extension);
+    long timeout = 30L;
+    if (g_str_has_prefix (ct, "video/"))
+      timeout = 120L;
+    curl_easy_setopt (curl, CURLOPT_TIMEOUT, timeout);
+  }
   curl_easy_setopt (curl, CURLOPT_CONNECTTIMEOUT, 10L);
 
   if (progress_cb)
