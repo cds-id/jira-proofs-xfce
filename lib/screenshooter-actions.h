@@ -26,5 +26,6 @@
 
 void screenshooter_take_screenshot       (ScreenshotData *sd,
                                           gboolean        immediate);
+void screenshooter_start_recording       (ScreenshotData *sd);
 
 #endif

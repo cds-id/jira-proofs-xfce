@@ -28,6 +28,13 @@
 #include "screenshooter-r2.h"
 #include "screenshooter-jira.h"
 #include "screenshooter-jira-dialog.h"
+#include "screenshooter-recorder.h"
+#include "screenshooter-recorder-dialog.h"
+#include "screenshooter-select.h"
+#ifdef ENABLE_X11
+#include "screenshooter-utils-x11.h"
+#endif
+#include <glib/gstdio.h>
 
 
 
@@ -302,6 +309,315 @@ action_idle (gpointer user_data)
 
 
 
+static void
+action_idle_recording (const gchar *save_location, ScreenshotData *sd)
+{
+  if (save_location == NULL)
+    {
+      sd->finalize_callback (FALSE, sd->finalize_callback_data);
+      return;
+    }
+
+  if (!sd->action_specified)
+    {
+      /* Create a placeholder pixbuf so the actions dialog preview doesn't crash.
+       * The actions dialog calls screenshot_get_thumbnail(sd->screenshot, ...)
+       * which would segfault on NULL. */
+      sd->screenshot = gdk_pixbuf_new (GDK_COLORSPACE_RGB, FALSE, 8, 320, 240);
+      gdk_pixbuf_fill (sd->screenshot, 0x333333FF);
+
+      GtkWidget *dialog = screenshooter_actions_dialog_new (sd);
+      gint response;
+
+      g_signal_connect (dialog, "response",
+                        G_CALLBACK (cb_help_response), NULL);
+
+      response = gtk_dialog_run (GTK_DIALOG (dialog));
+      gtk_widget_destroy (dialog);
+
+      g_object_unref (sd->screenshot);
+      sd->screenshot = NULL;
+
+      if (response == GTK_RESPONSE_CANCEL ||
+          response == GTK_RESPONSE_DELETE_EVENT ||
+          response == GTK_RESPONSE_CLOSE)
+        {
+          g_unlink (save_location);
+          sd->finalize_callback (FALSE, sd->finalize_callback_data);
+          return;
+        }
+    }
+
+  if (sd->action & SAVE)
+    {
+      /* Move temp file to user-chosen location via save dialog */
+      GFile *src = g_file_new_for_path (save_location);
+      gchar *dest_path = NULL;
+
+      GtkWidget *chooser = gtk_file_chooser_dialog_new (
+        "Save Recording", NULL, GTK_FILE_CHOOSER_ACTION_SAVE,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_Save", GTK_RESPONSE_ACCEPT, NULL);
+      gtk_file_chooser_set_do_overwrite_confirmation (
+        GTK_FILE_CHOOSER (chooser), TRUE);
+      {
+        gchar *basename = g_path_get_basename (save_location);
+        gtk_file_chooser_set_current_name (
+          GTK_FILE_CHOOSER (chooser), basename);
+        g_free (basename);
+      }
+
+      if (gtk_dialog_run (GTK_DIALOG (chooser)) == GTK_RESPONSE_ACCEPT)
+        dest_path = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (chooser));
+      gtk_widget_destroy (chooser);
+
+      if (dest_path)
+        {
+          GFile *dst = g_file_new_for_path (dest_path);
+          GError *err = NULL;
+          g_file_move (src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &err);
+          if (err)
+            {
+              g_warning ("Failed to save recording: %s", err->message);
+              g_error_free (err);
+            }
+          g_object_unref (dst);
+          g_free (dest_path);
+        }
+
+      g_object_unref (src);
+    }
+
+  /* Cloud actions: reuse existing R2/Jira flow */
+  if (sd->action & (UPLOAD_R2 | POST_JIRA))
+    {
+      GError *cloud_error = NULL;
+      CloudConfig *cloud_config = screenshooter_cloud_config_load (&cloud_error);
+
+      if (cloud_config == NULL)
+        {
+          GtkWidget *warn = gtk_message_dialog_new (NULL,
+            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+            "Cloud config error: %s",
+            cloud_error ? cloud_error->message : "unknown");
+          gtk_dialog_run (GTK_DIALOG (warn));
+          gtk_widget_destroy (warn);
+          g_clear_error (&cloud_error);
+        }
+      else
+        {
+          gchar *public_url = screenshooter_r2_upload (cloud_config,
+            save_location, NULL, NULL, &cloud_error);
+
+          if (public_url == NULL)
+            {
+              GtkWidget *warn = gtk_message_dialog_new (NULL,
+                GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                "R2 upload failed: %s",
+                cloud_error ? cloud_error->message : "Unknown error");
+              gtk_dialog_run (GTK_DIALOG (warn));
+              gtk_widget_destroy (warn);
+              g_clear_error (&cloud_error);
+            }
+          else if (sd->action & POST_JIRA)
+            {
+              if (sd->jira_issue_key && sd->jira_issue_key[0] != '\0')
+                {
+                  GError *jira_err = NULL;
+                  screenshooter_jira_post_comment (cloud_config,
+                    sd->jira_issue_key,
+                    cloud_config->presets.bug_evidence
+                      ? cloud_config->presets.bug_evidence : "Recording",
+                    "", public_url, &jira_err);
+                  if (jira_err)
+                    {
+                      GtkWidget *warn = gtk_message_dialog_new (NULL,
+                        GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                        "Jira post failed: %s", jira_err->message);
+                      gtk_dialog_run (GTK_DIALOG (warn));
+                      gtk_widget_destroy (warn);
+                      g_error_free (jira_err);
+                    }
+                  else
+                    {
+                      GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
+                      gtk_clipboard_set_text (clip, public_url, -1);
+
+                      GtkWidget *info = gtk_message_dialog_new (NULL,
+                        GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                        "Posted to %s!\n\n%s\n\n(URL copied to clipboard)",
+                        sd->jira_issue_key, public_url);
+                      gtk_dialog_run (GTK_DIALOG (info));
+                      gtk_widget_destroy (info);
+                    }
+                }
+              else
+                {
+                  screenshooter_jira_dialog_run (NULL, cloud_config,
+                                                  public_url);
+                }
+            }
+          else
+            {
+              GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
+              gtk_clipboard_set_text (clip, public_url, -1);
+
+              GtkWidget *info = gtk_message_dialog_new (NULL,
+                GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                "Uploaded to R2!\n\n%s\n\n(Copied to clipboard)", public_url);
+              gtk_dialog_run (GTK_DIALOG (info));
+              gtk_widget_destroy (info);
+            }
+
+          g_free (public_url);
+          screenshooter_cloud_config_free (cloud_config);
+        }
+    }
+
+  /* Clean up temp file if not saved */
+  if (!(sd->action & SAVE))
+    g_unlink (save_location);
+
+  sd->finalize_callback (TRUE, sd->finalize_callback_data);
+}
+
+
+
+static void
+cb_recording_stopped (const gchar *output_path, gpointer user_data)
+{
+  ScreenshotData *sd = user_data;
+  action_idle_recording (output_path, sd);
+}
+
+
+
+void
+screenshooter_start_recording (ScreenshotData *sd)
+{
+  GError *error = NULL;
+  gint x = 0, y = 0, w = 0, h = 0;
+  GdkDisplay *display;
+  GdkMonitor *monitor;
+  GdkRectangle geometry;
+
+  /* Check ffmpeg availability */
+  if (!screenshooter_recorder_available ())
+    {
+      GtkWidget *warn = gtk_message_dialog_new (NULL,
+        GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+        "FFmpeg is required for video recording.\n"
+        "Install with: sudo apt install ffmpeg");
+      gtk_dialog_run (GTK_DIALOG (warn));
+      gtk_widget_destroy (warn);
+      sd->finalize_callback (FALSE, sd->finalize_callback_data);
+      return;
+    }
+
+#ifdef ENABLE_WAYLAND
+  display = gdk_display_get_default ();
+  if (GDK_IS_WAYLAND_DISPLAY (display))
+    {
+      GtkWidget *warn = gtk_message_dialog_new (NULL,
+        GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+        "Video recording is currently supported on X11 only.\n"
+        "Wayland support coming in a future version.");
+      gtk_dialog_run (GTK_DIALOG (warn));
+      gtk_widget_destroy (warn);
+      sd->finalize_callback (FALSE, sd->finalize_callback_data);
+      return;
+    }
+#endif
+
+  /* Get capture region coordinates */
+  display = gdk_display_get_default ();
+  monitor = gdk_display_get_primary_monitor (display);
+  if (monitor == NULL)
+    monitor = gdk_display_get_monitor (display, 0);
+  gdk_monitor_get_geometry (monitor, &geometry);
+
+  if (sd->region == FULLSCREEN)
+    {
+      x = geometry.x;
+      y = geometry.y;
+      w = geometry.width;
+      h = geometry.height;
+    }
+  else if (sd->region == ACTIVE_WINDOW)
+    {
+#ifdef ENABLE_X11
+      {
+        GdkScreen *screen = gdk_display_get_default_screen (display);
+        gboolean needs_unref = FALSE, border = FALSE;
+        GdkWindow *active = screenshooter_get_active_window (screen,
+                                                               &needs_unref,
+                                                               &border);
+        if (active)
+          {
+            gdk_window_get_origin (active, &x, &y);
+            w = gdk_window_get_width (active);
+            h = gdk_window_get_height (active);
+            if (needs_unref)
+              g_object_unref (active);
+          }
+        else
+          {
+            /* Fallback to fullscreen */
+            x = geometry.x;
+            y = geometry.y;
+            w = geometry.width;
+            h = geometry.height;
+          }
+      }
+#else
+      {
+        /* Fallback to fullscreen (non-X11 build) */
+        x = geometry.x;
+        y = geometry.y;
+        w = geometry.width;
+        h = geometry.height;
+      }
+#endif
+    }
+  else if (sd->region == SELECT)
+    {
+      /* Reuse existing region selection from screenshooter-select.h */
+      GdkRectangle sel;
+      if (!screenshooter_select_region (&sel))
+        {
+          sd->finalize_callback (FALSE, sd->finalize_callback_data);
+          return;
+        }
+      x = sel.x;
+      y = sel.y;
+      w = sel.width;
+      h = sel.height;
+    }
+
+  /* Ensure dimensions are even (required by libx264) */
+  w = w & ~1;
+  h = h & ~1;
+
+  RecorderState *state = screenshooter_recorder_start (
+    sd->region, x, y, w, h, &error);
+
+  if (state == NULL)
+    {
+      GtkWidget *warn = gtk_message_dialog_new (NULL,
+        GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+        "Failed to start recording: %s", error->message);
+      gtk_dialog_run (GTK_DIALOG (warn));
+      gtk_widget_destroy (warn);
+      g_error_free (error);
+      sd->finalize_callback (FALSE, sd->finalize_callback_data);
+      return;
+    }
+
+  screenshooter_recorder_dialog_run (state, cb_recording_stopped, sd);
+}
+
+
+
 static gboolean
 take_screenshot_idle (gpointer user_data)
 {
@@ -329,6 +645,12 @@ take_screenshot_idle (gpointer user_data)
 void
 screenshooter_take_screenshot (ScreenshotData *sd, gboolean immediate)
 {
+  if (sd->recording)
+    {
+      screenshooter_start_recording (sd);
+      return;
+    }
+
   gint delay;
 
   if (sd->region == SELECT)
