@@ -161,7 +161,7 @@ action_idle (gpointer user_data)
         }
     }
 
-  /* Cloud actions */
+  /* Cloud actions: R2 upload first, then optionally Jira */
   if (sd->action & (UPLOAD_R2 | POST_JIRA))
     {
       GError *cloud_error = NULL;
@@ -169,95 +169,100 @@ action_idle (gpointer user_data)
 
       if (cloud_config == NULL)
         {
-          g_warning ("Cloud config error: %s",
-                     cloud_error ? cloud_error->message : "unknown");
+          GtkWidget *warn = gtk_message_dialog_new (NULL,
+            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+            "Cloud config error: %s",
+            cloud_error ? cloud_error->message : "unknown");
+          gtk_dialog_run (GTK_DIALOG (warn));
+          gtk_widget_destroy (warn);
           g_clear_error (&cloud_error);
         }
       else
         {
           gchar *public_url = NULL;
+          gchar *upload_file_path = NULL;
 
-          if (sd->action & UPLOAD_R2)
+          /* Use save_location from the else block (temp file already saved) */
+          if (save_location)
+            upload_file_path = g_strdup (save_location);
+
+          /* Step 1: Upload to R2 */
+          if (upload_file_path)
             {
-              const gchar *upload_path = save_location;
-              gchar *temp_path = NULL;
-
-              if (upload_path == NULL)
+              public_url = screenshooter_r2_upload (cloud_config,
+                upload_file_path, NULL, NULL, &cloud_error);
+              if (cloud_error)
                 {
-                  GFile *temp_dir = g_file_new_for_path (g_get_tmp_dir ());
-                  gchar *temp_dir_uri = g_file_get_uri (temp_dir);
-                  gchar *filename = screenshooter_get_filename_for_uri (
-                    temp_dir_uri, sd->title, sd->last_extension, sd->timestamp);
-                  gchar *temp_uri = screenshooter_save_screenshot (
-                    sd->screenshot, temp_dir_uri, filename,
-                    sd->last_extension, FALSE, FALSE);
-                  if (temp_uri)
-                    {
-                      GFile *f = g_file_new_for_uri (temp_uri);
-                      temp_path = g_file_get_path (f);
-                      g_object_unref (f);
-                      g_free (temp_uri);
-                    }
-                  g_object_unref (temp_dir);
-                  g_free (temp_dir_uri);
-                  g_free (filename);
-                  upload_path = temp_path;
+                  g_warning ("R2 upload error: %s", cloud_error->message);
+                  g_clear_error (&cloud_error);
                 }
-              else
-                {
-                  GFile *f = g_file_new_for_uri (upload_path);
-                  temp_path = g_file_get_path (f);
-                  g_object_unref (f);
-                  upload_path = temp_path;
-                }
-
-              if (upload_path)
-                {
-                  public_url = screenshooter_r2_upload (cloud_config,
-                    upload_path, NULL, NULL, &cloud_error);
-                  if (cloud_error)
-                    {
-                      g_warning ("R2 upload error: %s", cloud_error->message);
-                      g_clear_error (&cloud_error);
-                    }
-                }
-
-              g_free (temp_path);
             }
 
-          if (sd->action & POST_JIRA)
+          g_free (upload_file_path);
+
+          if (public_url == NULL)
             {
-              if (public_url)
+              GtkWidget *warn = gtk_message_dialog_new (NULL,
+                GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                "R2 upload failed: %s",
+                cloud_error ? cloud_error->message
+                            : "Failed to save screenshot for upload");
+              gtk_dialog_run (GTK_DIALOG (warn));
+              gtk_widget_destroy (warn);
+              g_clear_error (&cloud_error);
+            }
+          else if (sd->action & POST_JIRA)
+            {
+              /* Step 2: Post to Jira (R2 upload already done) */
+              if (sd->jira_issue_key && sd->jira_issue_key[0] != '\0')
                 {
-                  if (sd->jira_issue_key && sd->jira_issue_key[0] != '\0')
+                  /* CLI mode: post directly to specified issue */
+                  GError *jira_err = NULL;
+                  screenshooter_jira_post_comment (cloud_config,
+                    sd->jira_issue_key,
+                    cloud_config->presets.bug_evidence
+                      ? cloud_config->presets.bug_evidence : "Screenshot",
+                    "", public_url, &jira_err);
+                  if (jira_err)
                     {
-                      GError *jira_err = NULL;
-                      screenshooter_jira_post_comment (cloud_config,
-                        sd->jira_issue_key,
-                        cloud_config->presets.bug_evidence
-                          ? cloud_config->presets.bug_evidence : "Screenshot",
-                        "", public_url, &jira_err);
-                      if (jira_err)
-                        {
-                          g_warning ("Jira post error: %s", jira_err->message);
-                          g_error_free (jira_err);
-                        }
+                      GtkWidget *warn = gtk_message_dialog_new (NULL,
+                        GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                        "Jira post failed: %s", jira_err->message);
+                      gtk_dialog_run (GTK_DIALOG (warn));
+                      gtk_widget_destroy (warn);
+                      g_error_free (jira_err);
                     }
                   else
                     {
-                      screenshooter_jira_dialog_run (NULL, cloud_config,
-                                                      public_url);
+                      GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
+                      gtk_clipboard_set_text (clip, public_url, -1);
+
+                      GtkWidget *info = gtk_message_dialog_new (NULL,
+                        GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                        "Posted to %s!\n\n%s\n\n(URL copied to clipboard)",
+                        sd->jira_issue_key, public_url);
+                      gtk_dialog_run (GTK_DIALOG (info));
+                      gtk_widget_destroy (info);
                     }
                 }
               else
                 {
-                  GtkWidget *warn = gtk_message_dialog_new (NULL,
-                    GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING, GTK_BUTTONS_OK,
-                    "No image URL available. Enable 'Upload to R2' to "
-                    "post screenshots to Jira.");
-                  gtk_dialog_run (GTK_DIALOG (warn));
-                  gtk_widget_destroy (warn);
+                  /* GUI mode: show dialog to pick issue and preset */
+                  screenshooter_jira_dialog_run (NULL, cloud_config,
+                                                  public_url);
                 }
+            }
+          else
+            {
+              /* R2-only: show the public URL and copy to clipboard */
+              GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
+              gtk_clipboard_set_text (clip, public_url, -1);
+
+              GtkWidget *info = gtk_message_dialog_new (NULL,
+                GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                "Uploaded to R2!\n\n%s\n\n(Copied to clipboard)", public_url);
+              gtk_dialog_run (GTK_DIALOG (info));
+              gtk_widget_destroy (info);
             }
 
           g_free (public_url);

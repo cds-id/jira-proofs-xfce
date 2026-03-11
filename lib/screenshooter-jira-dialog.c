@@ -242,6 +242,20 @@ screenshooter_jira_dialog_run (GtkWindow *parent,
           gtk_widget_destroy (err_dlg);
           g_error_free (error);
         }
+      else
+        {
+          /* Copy URL to clipboard and show success */
+          GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
+          gtk_clipboard_set_text (clip, image_url, -1);
+
+          GtkWidget *ok_dlg = gtk_message_dialog_new (
+            GTK_WINDOW (dlg), GTK_DIALOG_MODAL,
+            GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+            "Posted to %s!\n\n%s\n\n(URL copied to clipboard)",
+            data.selected_key, image_url);
+          gtk_dialog_run (GTK_DIALOG (ok_dlg));
+          gtk_widget_destroy (ok_dlg);
+        }
 
       g_free (desc);
       g_free (preset_title);
