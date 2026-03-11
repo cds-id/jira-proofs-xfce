@@ -23,6 +23,8 @@ libscreenshooter_sources = [
   'screenshooter-jira.h',
   'screenshooter-jira-dialog.c',
   'screenshooter-jira-dialog.h',
+  'screenshooter-recorder.c',
+  'screenshooter-recorder.h',
 ]
 
 libscreenshooter_sources += gnome.genmarshal(
