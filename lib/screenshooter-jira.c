@@ -65,10 +65,14 @@ screenshooter_jira_search (const CloudConfig *config,
   else
     {
       gchar *safe = g_strescape (query, NULL);
-      jql = g_strdup_printf (
-        "project = %s AND summary ~ \\\"%s\\\" AND status != Done "
-        "ORDER BY updated DESC",
-        config->jira.default_project, safe);
+      /* If query looks like an issue key (e.g. PROJ-123), search by key */
+      if (g_regex_match_simple ("^[A-Z]+-[0-9]+$", safe, 0, 0))
+        jql = g_strdup_printf ("key = %s", safe);
+      else
+        jql = g_strdup_printf (
+          "project = %s AND summary ~ \\\"%s\\\" AND status != Done "
+          "ORDER BY updated DESC",
+          config->jira.default_project, safe);
       g_free (safe);
     }
 
@@ -93,7 +97,7 @@ screenshooter_jira_search (const CloudConfig *config,
   g_object_unref (builder);
 
   auth = build_auth_header (config->jira.email, config->jira.api_token);
-  url = g_strdup_printf ("%s/rest/api/3/search", config->jira.base_url);
+  url = g_strdup_printf ("%s/rest/api/3/search/jql", config->jira.base_url);
 
   curl = curl_easy_init ();
   headers = curl_slist_append (headers, auth);
