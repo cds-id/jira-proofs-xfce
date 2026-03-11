@@ -21,6 +21,7 @@
 #include "screenshooter-actions.h"
 #include "screenshooter-custom-actions.h"
 #include "screenshooter-format.h"
+#include "screenshooter-cloud-config.h"
 
 #include <libxfce4ui/libxfce4ui.h>
 
@@ -1113,6 +1114,24 @@ GtkWidget *screenshooter_region_dialog_new (ScreenshotData *sd, gboolean plugin)
 
 
 
+static void
+cb_upload_r2_toggled (GtkToggleButton *tb, ScreenshotData *sd)
+{
+  if (gtk_toggle_button_get_active (tb))
+    sd->action |= UPLOAD_R2;
+  else
+    sd->action &= ~UPLOAD_R2;
+}
+
+static void
+cb_post_jira_toggled (GtkToggleButton *tb, ScreenshotData *sd)
+{
+  if (gtk_toggle_button_get_active (tb))
+    sd->action |= POST_JIRA;
+  else
+    sd->action &= ~POST_JIRA;
+}
+
 GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
 {
   GtkWidget *dlg, *grid, *box, *evbox, *label, *radio, *checkbox;
@@ -1297,6 +1316,60 @@ GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
     {
       g_object_unref (liststore);
     }
+
+  /* Cloud section */
+  {
+    GError *cloud_err = NULL;
+    CloudConfig *cloud_config = screenshooter_cloud_config_load (&cloud_err);
+    gboolean r2_available = screenshooter_cloud_config_valid_r2 (cloud_config);
+    gboolean jira_available = screenshooter_cloud_config_valid_jira (cloud_config);
+    gchar *config_path = screenshooter_cloud_config_get_path ();
+    gchar *tooltip_unavailable = g_strdup_printf (
+      "Configure in %s", config_path);
+
+    label = gtk_label_new ("");
+    gtk_label_set_markup (GTK_LABEL (label),
+      _("<span weight=\"bold\" stretch=\"semiexpanded\">Cloud</span>"));
+    gtk_widget_set_halign (label, GTK_ALIGN_START);
+    gtk_box_pack_start (GTK_BOX (box), label, FALSE, FALSE, 0);
+
+    GtkWidget *cloud_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_start (cloud_box, 12);
+    gtk_box_pack_start (GTK_BOX (box), cloud_box, FALSE, FALSE, 0);
+
+    GtkWidget *r2_check = gtk_check_button_new_with_label (
+      _("Upload to Cloudflare R2"));
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (r2_check),
+      (sd->action & UPLOAD_R2));
+    gtk_widget_set_sensitive (r2_check, r2_available);
+    if (!r2_available)
+      gtk_widget_set_tooltip_text (r2_check, tooltip_unavailable);
+    else
+      gtk_widget_set_tooltip_text (r2_check,
+        _("Upload the screenshot to Cloudflare R2 storage"));
+    g_signal_connect (G_OBJECT (r2_check), "toggled",
+      G_CALLBACK (cb_upload_r2_toggled), sd);
+    gtk_box_pack_start (GTK_BOX (cloud_box), r2_check, FALSE, FALSE, 0);
+
+    GtkWidget *jira_check = gtk_check_button_new_with_label (
+      _("Post to Jira issue"));
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (jira_check),
+      (sd->action & POST_JIRA));
+    gtk_widget_set_sensitive (jira_check, jira_available);
+    if (!jira_available)
+      gtk_widget_set_tooltip_text (jira_check, tooltip_unavailable);
+    else
+      gtk_widget_set_tooltip_text (jira_check,
+        _("Post the screenshot as a comment on a Jira issue"));
+    g_signal_connect (G_OBJECT (jira_check), "toggled",
+      G_CALLBACK (cb_post_jira_toggled), sd);
+    gtk_box_pack_start (GTK_BOX (cloud_box), jira_check, FALSE, FALSE, 0);
+
+    g_free (tooltip_unavailable);
+    g_free (config_path);
+    screenshooter_cloud_config_free (cloud_config);
+    g_clear_error (&cloud_err);
+  }
 
   /* Run the callback functions to grey/ungrey the correct widgets */
   cb_toggle_set_sensi (GTK_TOGGLE_BUTTON (radio), combobox);
