@@ -66,6 +66,7 @@ typedef struct
   gchar *last_user;
   gchar *last_extension;
   gchar *jira_issue_key;
+  gboolean recording;
   GdkPixbuf *screenshot;
   ScreenshotFinalizeCallback finalize_callback;
   gpointer finalize_callback_data;
