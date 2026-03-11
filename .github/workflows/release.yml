@@ -22,7 +22,7 @@ jobs:
             libexo-2-dev \
             libx11-dev libxi-dev libxext-dev libxfixes-dev \
             libcurl4-openssl-dev libjson-glib-dev \
-            dpkg-dev debhelper fakeroot
+            dpkg-dev debhelper fakeroot gettext
 
       - name: Configure
         run: meson setup build --prefix=/usr -Dwayland=disabled

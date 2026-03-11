@@ -22,7 +22,8 @@ jobs:
             libxfconf-0-dev libxfce4panel-2.0-dev \
             libexo-2-dev \
             libx11-dev libxi-dev libxext-dev libxfixes-dev \
-            libcurl4-openssl-dev libjson-glib-dev
+            libcurl4-openssl-dev libjson-glib-dev \
+            gettext
 
       - name: Configure
         run: meson setup build -Dwayland=disabled
