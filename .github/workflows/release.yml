@@ -94,12 +94,23 @@ jobs:
             mingw-w64-x86_64-curl
             mingw-w64-x86_64-json-glib
             mingw-w64-x86_64-gettext
+            mingw-w64-x86_64-nsis
 
       - name: Configure
         run: meson setup build
 
       - name: Build
         run: meson compile -C build
+
+      - name: Download FFmpeg
+        shell: pwsh
+        run: |
+          $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest -Uri $ffmpegUrl -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-tmp
+          $ffmpegDir = Get-ChildItem -Path ffmpeg-tmp -Directory | Select-Object -First 1
+          Copy-Item "$($ffmpegDir.FullName)\bin\ffmpeg.exe" -Destination .
+          Copy-Item "$($ffmpegDir.FullName)\bin\ffprobe.exe" -Destination .
 
       - name: Package Windows build
         run: |
@@ -110,6 +121,9 @@ jobs:
           ldd build/src/xfce4-screenshooter.exe | grep mingw | awk '{print $3}' | while read dll; do
             cp "$dll" dist/
           done
+          # Copy FFmpeg
+          cp ffmpeg.exe dist/
+          cp ffprobe.exe dist/
 
       - name: Create Windows zip
         shell: pwsh
@@ -117,11 +131,19 @@ jobs:
           $version = "${{ github.ref_name }}".TrimStart("v")
           Compress-Archive -Path dist\* -DestinationPath "jira-proofs-xfce-${version}-windows-amd64.zip"
 
+      - name: Build NSIS installer
+        run: |
+          makensis -DDIST_DIR=dist installer/screenshooter.nsi
+          VERSION=${GITHUB_REF_NAME#v}
+          mv installer/screenshooter-setup.exe "jira-proofs-xfce-${VERSION}-windows-setup.exe"
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-artifacts
-          path: jira-proofs-xfce-*-windows-amd64.zip
+          path: |
+            jira-proofs-xfce-*-windows-amd64.zip
+            jira-proofs-xfce-*-windows-setup.exe
 
   release:
     needs: [build-package, build-windows]
