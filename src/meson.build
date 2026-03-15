@@ -2,11 +2,18 @@ if host_machine.system() == 'windows'
   executable(
     'xfce4-screenshooter',
     'main-win32.c',
-    include_directories: [include_directories('..')],
+    win32_resources,
+    include_directories: [
+      include_directories('..'),
+      include_directories('..' / 'lib' / 'ui-win32'),
+    ],
     dependencies: [
       glib,
+      dependency('gdk-pixbuf-2.0'),
+      dependency('gobject-2.0'),
       libscreenshooter_core_dep,
       libscreenshooter_platform_dep,
+      libscreenshooter_win32_dep,
     ],
     install: true,
   )

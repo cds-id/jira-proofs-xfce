@@ -211,6 +211,10 @@ xfce_revision_h = vcs_tag(
 subdir('lib/platform')
 subdir('lib/core')
 
+if host_machine.system() == 'windows'
+  subdir('lib/ui-win32')
+endif
+
 if host_machine.system() != 'windows'
   subdir('icons')
   subdir('po')
