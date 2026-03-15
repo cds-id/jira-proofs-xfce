@@ -30,6 +30,7 @@ jobs:
             mingw-w64-x86_64-curl
             mingw-w64-x86_64-json-glib
             mingw-w64-x86_64-gettext
+            mingw-w64-x86_64-nsis
 
       - name: Configure
         run: meson setup build
@@ -38,4 +39,7 @@ jobs:
         run: meson compile -C build
 
       - name: Run validation
-        run: ./build/src/xfce4-screenshooter.exe
+        run: ./build/src/xfce4-screenshooter.exe --help
+
+      - name: List DLL dependencies
+        run: ldd build/src/xfce4-screenshooter.exe | grep mingw
