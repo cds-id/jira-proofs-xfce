@@ -136,7 +136,7 @@ jobs:
           DIST_DIR=$(cygpath -w "$(pwd)/dist")
           makensis -DDIST_DIR="$DIST_DIR" installer/screenshooter.nsi
           VERSION=${GITHUB_REF_NAME#v}
-          mv screenshooter-setup.exe "jira-proofs-xfce-${VERSION}-windows-setup.exe"
+          mv installer/screenshooter-setup.exe "jira-proofs-xfce-${VERSION}-windows-setup.exe"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
