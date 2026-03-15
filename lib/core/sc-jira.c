@@ -326,6 +326,14 @@ sc_jira_post_comment (const CloudConfig *config,
 gboolean
 sc_jira_test_connection (const CloudConfig *config, GError **error)
 {
+  CURL *curl;
+  CURLcode res;
+  CurlBuffer response = { NULL, 0 };
+  struct curl_slist *headers = NULL;
+  gchar *auth, *url;
+  long http_code;
+  gboolean success = FALSE;
+
   if (!sc_cloud_config_valid_jira (config))
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
@@ -333,9 +341,61 @@ sc_jira_test_connection (const CloudConfig *config, GError **error)
       return FALSE;
     }
 
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-               "Jira test connection not yet implemented");
-  return FALSE;
+  auth = build_auth_header (config->jira.email, config->jira.api_token);
+  url = g_strdup_printf ("%s/rest/api/3/myself", config->jira.base_url);
+
+  curl = curl_easy_init ();
+  if (curl == NULL)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to initialize curl");
+      g_free (auth);
+      g_free (url);
+      return FALSE;
+    }
+
+  headers = curl_slist_append (headers, auth);
+  headers = curl_slist_append (headers, "Content-Type: application/json");
+
+  curl_easy_setopt (curl, CURLOPT_URL, url);
+  curl_easy_setopt (curl, CURLOPT_HTTPGET, 1L);
+  curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
+  curl_easy_setopt (curl, CURLOPT_WRITEDATA, &response);
+  curl_easy_setopt (curl, CURLOPT_TIMEOUT, 10L);
+  curl_easy_setopt (curl, CURLOPT_CONNECTTIMEOUT, 10L);
+
+  res = curl_easy_perform (curl);
+  if (res != CURLE_OK)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Jira connection failed: %s", curl_easy_strerror (res));
+    }
+  else
+    {
+      curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &http_code);
+      if (http_code == 200)
+        {
+          success = TRUE;
+        }
+      else if (http_code == 401 || http_code == 403)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                       "Jira authentication failed (HTTP %ld)", http_code);
+        }
+      else
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Jira test connection failed with HTTP %ld", http_code);
+        }
+    }
+
+  curl_easy_cleanup (curl);
+  curl_slist_free_all (headers);
+  g_free (auth);
+  g_free (url);
+  g_free (response.data);
+  return success;
 }
 
 

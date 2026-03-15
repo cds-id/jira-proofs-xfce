@@ -300,6 +300,23 @@ cleanup:
 gboolean
 sc_r2_test_connection (const CloudConfig *config, GError **error)
 {
+  CURL *curl;
+  CURLcode res;
+  gchar *host, *url;
+  gchar *payload_hash;
+  GDateTime *now;
+  gchar *amz_date, *date_stamp;
+  gchar *canonical_request, *canonical_headers, *signed_headers;
+  gchar *credential_scope, *string_to_sign, *canonical_request_hash;
+  guchar *signing_key;
+  gsize signing_key_len;
+  gchar *signature;
+  gchar *auth_header;
+  gchar *h_sha = NULL, *h_date = NULL;
+  struct curl_slist *headers = NULL;
+  long http_code;
+  gboolean success = FALSE;
+
   if (!sc_cloud_config_valid_r2 (config))
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
@@ -307,7 +324,111 @@ sc_r2_test_connection (const CloudConfig *config, GError **error)
       return FALSE;
     }
 
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-               "R2 test connection not yet implemented");
-  return FALSE;
+  host = g_strdup_printf ("%s.r2.cloudflarestorage.com",
+                           config->r2.account_id);
+  url = g_strdup_printf ("https://%s/%s", host, config->r2.bucket);
+
+  /* Empty payload for HEAD request */
+  payload_hash = sha256_hex ((const guchar *) "", 0);
+
+  now = g_date_time_new_now_utc ();
+  amz_date = g_date_time_format (now, "%Y%m%dT%H%M%SZ");
+  date_stamp = g_date_time_format (now, "%Y%m%d");
+  g_date_time_unref (now);
+
+  signed_headers = g_strdup ("host;x-amz-content-sha256;x-amz-date");
+  canonical_headers = g_strdup_printf (
+    "host:%s\nx-amz-content-sha256:%s\nx-amz-date:%s\n",
+    host, payload_hash, amz_date);
+  canonical_request = g_strdup_printf (
+    "HEAD\n/%s\n\n%s\n%s\n%s",
+    config->r2.bucket,
+    canonical_headers, signed_headers, payload_hash);
+
+  credential_scope = g_strdup_printf ("%s/auto/s3/aws4_request", date_stamp);
+  canonical_request_hash = sha256_hex (
+    (const guchar *) canonical_request, strlen (canonical_request));
+  string_to_sign = g_strdup_printf (
+    "AWS4-HMAC-SHA256\n%s\n%s\n%s",
+    amz_date, credential_scope, canonical_request_hash);
+
+  signing_key = derive_signing_key (config->r2.secret_access_key,
+                                     date_stamp, "auto", "s3",
+                                     &signing_key_len);
+  signature = hmac_sha256_hex (signing_key, signing_key_len,
+                                string_to_sign, strlen (string_to_sign));
+
+  auth_header = g_strdup_printf (
+    "Authorization: AWS4-HMAC-SHA256 Credential=%s/%s, "
+    "SignedHeaders=%s, Signature=%s",
+    config->r2.access_key_id, credential_scope,
+    signed_headers, signature);
+
+  curl = curl_easy_init ();
+  if (curl == NULL)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to initialize curl");
+      goto cleanup;
+    }
+
+  h_sha = g_strdup_printf ("x-amz-content-sha256: %s", payload_hash);
+  h_date = g_strdup_printf ("x-amz-date: %s", amz_date);
+  headers = curl_slist_append (headers, auth_header);
+  headers = curl_slist_append (headers, h_sha);
+  headers = curl_slist_append (headers, h_date);
+
+  curl_easy_setopt (curl, CURLOPT_URL, url);
+  curl_easy_setopt (curl, CURLOPT_NOBODY, 1L);
+  curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt (curl, CURLOPT_TIMEOUT, 10L);
+  curl_easy_setopt (curl, CURLOPT_CONNECTTIMEOUT, 10L);
+
+  res = curl_easy_perform (curl);
+  if (res != CURLE_OK)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "R2 connection failed: %s", curl_easy_strerror (res));
+    }
+  else
+    {
+      curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &http_code);
+      if (http_code == 200 || http_code == 404)
+        {
+          success = TRUE;
+        }
+      else if (http_code == 403)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                       "R2 authentication failed (HTTP 403)");
+        }
+      else
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "R2 test connection failed with HTTP %ld", http_code);
+        }
+    }
+
+  curl_easy_cleanup (curl);
+
+cleanup:
+  curl_slist_free_all (headers);
+  g_free (h_sha);
+  g_free (h_date);
+  g_free (host);
+  g_free (url);
+  g_free (payload_hash);
+  g_free (amz_date);
+  g_free (date_stamp);
+  g_free (signed_headers);
+  g_free (canonical_headers);
+  g_free (canonical_request);
+  g_free (credential_scope);
+  g_free (canonical_request_hash);
+  g_free (string_to_sign);
+  g_free (signing_key);
+  g_free (signature);
+  g_free (auth_header);
+
+  return success;
 }
