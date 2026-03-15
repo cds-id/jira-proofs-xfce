@@ -8,6 +8,13 @@
 #include <sddl.h>
 
 
+static void
+pixbuf_free_pixels (guchar *pixels, gpointer data)
+{
+  g_free (pixels);
+}
+
+
 gchar *
 sc_platform_config_dir (void)
 {
@@ -174,7 +181,7 @@ sc_platform_capture (ScCaptureMode mode, ScRegion *region)
                                       8,
                                       width, height,
                                       stride,
-                                      (GdkPixbufDestroyNotify) g_free,
+                                      pixbuf_free_pixels,
                                       NULL);
 
   DeleteObject (hbm);

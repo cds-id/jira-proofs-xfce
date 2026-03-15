@@ -3,11 +3,14 @@
 #include <glib.h>
 #include <gio/gio.h>
 #include <string.h>
+#include <time.h>
+#include <glib/gstdio.h>
+
+#ifndef G_OS_WIN32
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <time.h>
-#include <glib/gstdio.h>
+#endif
 
 static RecorderState *active_recorder = NULL;
 
@@ -25,6 +28,7 @@ sc_recorder_available (void)
 }
 
 
+#ifndef G_OS_WIN32
 static gchar *
 get_display_string (void)
 {
@@ -39,6 +43,7 @@ get_display_string (void)
 
   return g_strdup (display);
 }
+#endif
 
 
 static gchar *
@@ -56,6 +61,12 @@ RecorderState *
 sc_recorder_start (gint region, gint x, gint y, gint w, gint h,
                    GError **error)
 {
+#ifdef G_OS_WIN32
+  /* TODO: Windows recording via gdigrab — needs platform layer integration */
+  g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+               "Recording is not yet supported on Windows");
+  return NULL;
+#else
   RecorderState *state;
   gchar *display_str;
   gchar *input_str;
@@ -120,6 +131,7 @@ sc_recorder_start (gint region, gint x, gint y, gint w, gint h,
   state->pid = pid;
   active_recorder = state;
   return state;
+#endif
 }
 
 
@@ -127,7 +139,6 @@ gchar *
 sc_recorder_stop (RecorderState *state, GError **error)
 {
   gchar *result;
-  gint status;
 
   if (state == NULL)
     {
@@ -145,18 +156,25 @@ sc_recorder_stop (RecorderState *state, GError **error)
 
   state->stopped = TRUE;
 
-  /* Send SIGINT for clean shutdown (writes MP4 trailer) */
-  kill (state->pid, SIGINT);
+#ifndef G_OS_WIN32
+  {
+    gint status;
 
-  /* Remove child watch before waitpid to prevent race condition */
-  if (state->child_watch_id > 0)
-    {
-      g_source_remove (state->child_watch_id);
-      state->child_watch_id = 0;
-    }
+    /* Send SIGINT for clean shutdown (writes MP4 trailer) */
+    kill (state->pid, SIGINT);
 
-  /* Wait for ffmpeg to finish */
-  waitpid (state->pid, &status, 0);
+    /* Remove child watch before waitpid to prevent race condition */
+    if (state->child_watch_id > 0)
+      {
+        g_source_remove (state->child_watch_id);
+        state->child_watch_id = 0;
+      }
+
+    /* Wait for ffmpeg to finish */
+    waitpid (state->pid, &status, 0);
+  }
+#endif
+
   g_spawn_close_pid (state->pid);
 
   if (!g_file_test (state->output_path, G_FILE_TEST_EXISTS))
@@ -192,8 +210,11 @@ sc_recorder_cleanup (void)
     return;
 
   active_recorder->stopped = TRUE;
+
+#ifndef G_OS_WIN32
   kill (active_recorder->pid, SIGINT);
   waitpid (active_recorder->pid, NULL, 0);
+#endif
 
   if (active_recorder->output_path)
     g_unlink (active_recorder->output_path);
