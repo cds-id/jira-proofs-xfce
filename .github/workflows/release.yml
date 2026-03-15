@@ -132,10 +132,12 @@ jobs:
           Compress-Archive -Path dist\* -DestinationPath "jira-proofs-xfce-${version}-windows-amd64.zip"
 
       - name: Build NSIS installer
+        shell: pwsh
         run: |
-          makensis -DDIST_DIR=dist installer/screenshooter.nsi
-          VERSION=${GITHUB_REF_NAME#v}
-          mv installer/screenshooter-setup.exe "jira-proofs-xfce-${VERSION}-windows-setup.exe"
+          $distDir = (Resolve-Path "dist").Path
+          & makensis "-DDIST_DIR=$distDir" installer\screenshooter.nsi
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          Move-Item screenshooter-setup.exe "jira-proofs-xfce-${version}-windows-setup.exe"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
