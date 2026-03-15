@@ -2,7 +2,7 @@
 #include <glib/gstdio.h>
 #include <gio/gio.h>
 #include <string.h>
-#include "../lib/screenshooter-video-editor-blur.h"
+#include "../lib/core/sc-video-editor-blur.h"
 
 
 static gchar *

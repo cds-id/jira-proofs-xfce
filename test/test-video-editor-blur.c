@@ -1,6 +1,6 @@
 #include <glib.h>
 #include <string.h>
-#include "../lib/screenshooter-video-editor-blur.h"
+#include "../lib/core/sc-video-editor-blur.h"
 
 
 static VideoEditorState *
