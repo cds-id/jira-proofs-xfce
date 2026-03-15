@@ -30,6 +30,7 @@
 #include "screenshooter-jira-dialog.h"
 #include "screenshooter-recorder-dialog.h"
 #include "screenshooter-video-editor.h"
+#include "screenshooter-wizard.h"
 
 /* Core library */
 #include <sc-cloud-config.h>

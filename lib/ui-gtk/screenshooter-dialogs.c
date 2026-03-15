@@ -25,6 +25,7 @@
 #include <sc-recorder.h>
 #include <sc-platform.h>
 #include "screenshooter-video-editor.h"
+#include "screenshooter-wizard.h"
 
 #include <libxfce4ui/libxfce4ui.h>
 
@@ -1179,6 +1180,15 @@ cb_post_jira_toggled (GtkToggleButton *tb, ScreenshotData *sd)
 
 
 static void
+cb_reconfigure_cloud (GtkButton *button, gpointer user_data)
+{
+  GtkWindow *parent = GTK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (button)));
+  gchar *config_dir = sc_platform_config_dir ();
+  screenshooter_wizard_run (parent, config_dir);
+  g_free (config_dir);
+}
+
+static void
 cb_edit_video_clicked (GtkButton *button, GtkWidget *dlg)
 {
   screenshooter_video_editor_run (GTK_WINDOW (dlg));
@@ -1429,6 +1439,18 @@ GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
     g_free (config_path);
     sc_cloud_config_free (cloud_config);
     g_clear_error (&cloud_err);
+  }
+
+  /* Reconfigure Cloud Services button */
+  {
+    GtkWidget *reconfig_btn = gtk_button_new_with_label (_("Reconfigure Cloud Services..."));
+    gtk_widget_set_tooltip_text (reconfig_btn,
+      _("Launch the cloud services setup wizard to reconfigure R2 and Jira settings"));
+    g_signal_connect (reconfig_btn, "clicked",
+                      G_CALLBACK (cb_reconfigure_cloud), NULL);
+    gtk_widget_set_halign (reconfig_btn, GTK_ALIGN_START);
+    gtk_widget_set_margin_top (reconfig_btn, 6);
+    gtk_box_pack_start (GTK_BOX (box), reconfig_btn, FALSE, FALSE, 0);
   }
 
   /* Run the callback functions to grey/ungrey the correct widgets */

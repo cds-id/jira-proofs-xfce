@@ -19,6 +19,7 @@
 
 #include "libscreenshooter.h"
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <stdlib.h>
 
 
@@ -40,6 +41,7 @@ gboolean record_window = FALSE;
 gboolean record_region = FALSE;
 gboolean edit_video = FALSE;
 gchar *edit_video_path = NULL;
+gboolean setup_wizard = FALSE;
 gchar *screenshot_dir = NULL;
 gchar *application = NULL;
 gint delay = 0;
@@ -143,6 +145,12 @@ static GOptionEntry entries[] =
     "edit-video", 'e', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
     &edit_video,
     N_("Open the video blur editor (use with a file path argument)"),
+    NULL
+  },
+  {
+    "setup-wizard", 0, G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
+    &setup_wizard,
+    N_("Launch the cloud services setup wizard"),
     NULL
   },
   {
@@ -308,6 +316,39 @@ int main (int argc, char **argv)
   /* Read the preferences */
   rc_file = xfce_resource_save_location (XFCE_RESOURCE_CONFIG, "xfce4/xfce4-screenshooter", TRUE);
   screenshooter_read_rc_file (rc_file, sd);
+
+  /* First-run wizard or manual re-run */
+  {
+    gchar *config_dir = sc_platform_config_dir ();
+    gboolean need_wizard = setup_wizard;
+
+    if (!need_wizard && !sc_cloud_config_exists (config_dir))
+      need_wizard = TRUE;
+
+    /* If config exists but is corrupt, delete and re-trigger */
+    if (!need_wizard && sc_cloud_config_exists (config_dir))
+      {
+        GError *load_error = NULL;
+        CloudConfig *test = sc_cloud_config_load (config_dir, &load_error);
+        if (test == NULL && load_error != NULL &&
+            load_error->code != G_IO_ERROR_NOT_FOUND)
+          {
+            g_warning ("Corrupt cloud config, resetting: %s", load_error->message);
+            gchar *path = sc_cloud_config_get_path (config_dir);
+            g_unlink (path);
+            g_free (path);
+            need_wizard = TRUE;
+          }
+        g_clear_error (&load_error);
+        sc_cloud_config_free (test);
+      }
+
+    if (need_wizard && !fullscreen && !window && !region && !any_record && !edit_video)
+      {
+        screenshooter_wizard_run (NULL, config_dir);
+      }
+    g_free (config_dir);
+  }
 
   /* Default to no action specified */
   sd->action_specified = FALSE;
