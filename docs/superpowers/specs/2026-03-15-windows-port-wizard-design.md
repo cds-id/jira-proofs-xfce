@@ -28,7 +28,7 @@ Additions to the existing repository:
 ```
 ├── lib/
 │   ├── core/                          # libscreenshooter-core (platform-independent)
-│   │   ├── sc-cloud-config.c/h        # TOML config parse/save
+│   │   ├── sc-cloud-config.c/h        # Cloud config parse/save (GKeyFile INI)
 │   │   ├── sc-r2.c/h                  # R2 upload (libcurl)
 │   │   ├── sc-jira.c/h                # Jira API (libcurl + json-glib)
 │   │   ├── sc-recorder.c/h            # FFmpeg subprocess management
@@ -160,7 +160,7 @@ Both UIs call the same core functions:
 - `sc_cloud_config_create_default()` — creates empty `CloudConfig` struct with NULL/empty fields
 - `sc_r2_test_connection(const CloudConfig *config)` — validates R2 credentials via HEAD request to bucket (new, wraps existing curl logic). Returns `TRUE` on success, `FALSE` with `GError` on failure.
 - `sc_jira_test_connection(const CloudConfig *config)` — validates Jira credentials via `GET /rest/api/3/myself` (new). Returns `TRUE` on success, `FALSE` with `GError` on failure.
-- `sc_cloud_config_save(const CloudConfig *config)` — new function that serializes config to GKeyFile INI format (not strict TOML — GKeyFile natively writes INI which is a compatible subset for the key-value pairs used here). Creates the config directory if it doesn't exist (`g_mkdir_with_parents`). On Linux, sets file permissions to `0600`. On Windows, sets restrictive ACLs via `SetFileSecurity()` (owner-only read/write). Overwrites any existing config file.
+- `sc_cloud_config_save(const CloudConfig *config, GError **error)` — new function that serializes config to GKeyFile INI format (not strict TOML — GKeyFile natively writes INI which is a compatible subset for the key-value pairs used here). Creates the config directory if it doesn't exist (`g_mkdir_with_parents`). On Linux, sets file permissions to `0600`. On Windows, sets restrictive ACLs via `SetFileSecurity()` (owner-only read/write). Returns `TRUE` on success, `FALSE` with `GError` on failure (directory creation, file write, or permission errors). When re-running the wizard on an existing config, the function first loads the existing config via `sc_cloud_config_load()`, then overwrites only the `[r2]` and `[jira]` sections with wizard-provided values, preserving other sections (e.g., `[presets]`) untouched.
 
 ### Config Format Clarification
 
@@ -168,7 +168,7 @@ The config file uses GKeyFile's native INI format (group headers with `[section]
 
 ### Relationship to Platform Config Abstraction
 
-The `sc_platform_config_*()` functions in the platform layer handle general app preferences (capture mode, save location, etc.) and route through xfconf on Linux or a separate INI file on Windows. The `sc_cloud_config_*()` functions in the core layer handle cloud credentials specifically and always use direct file I/O (GKeyFile) on both platforms — they do NOT go through the platform abstraction, since the cloud config format and path are the same on both platforms (only the directory root differs, handled by `sc_platform_config_path()`).
+The `sc_platform_config_*()` functions in the platform layer handle general app preferences (capture mode, save location, etc.) and route through xfconf on Linux or a separate INI file on Windows. The `sc_cloud_config_*()` functions in the core layer handle cloud credentials specifically and always use direct file I/O (GKeyFile) on both platforms — they do NOT go through the platform abstraction. `sc_platform_config_path()` returns the **directory** path (e.g., `~/.config/xfce4-screenshooter/` on Linux, `%APPDATA%\xfce4-screenshooter\` on Windows). Cloud config functions append `cloud.toml` to this directory. `sc_platform_config_exists()` checks for the existence of `cloud.toml` specifically within this directory.
 
 ### Config Paths
 
