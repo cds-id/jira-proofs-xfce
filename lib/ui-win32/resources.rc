@@ -1,0 +1,88 @@
+#include <windows.h>
+#include "resource.h"
+
+/* Main capture dialog */
+IDD_MAIN_DIALOG DIALOGEX 0, 0, 280, 230
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_CENTER
+CAPTION "Screenshooter"
+FONT 9, "Segoe UI"
+BEGIN
+    GROUPBOX "Capture Region", IDC_GROUP_REGION, 7, 7, 266, 65
+    AUTORADIOBUTTON "Entire screen", IDC_RADIO_FULLSCREEN, 15, 20, 120, 10, WS_GROUP
+    AUTORADIOBUTTON "Active window", IDC_RADIO_WINDOW, 15, 35, 120, 10
+    AUTORADIOBUTTON "Select region", IDC_RADIO_REGION, 15, 50, 120, 10
+
+    GROUPBOX "Options", IDC_GROUP_OPTIONS, 7, 78, 266, 40
+    AUTOCHECKBOX "Include mouse pointer", IDC_CHECK_MOUSE, 15, 93, 120, 10
+    LTEXT "Delay (seconds):", IDC_LABEL_DELAY, 150, 93, 65, 10
+    EDITTEXT IDC_SPIN_DELAY, 220, 91, 40, 14, ES_NUMBER | WS_BORDER
+
+    GROUPBOX "Action", IDC_GROUP_ACTION, 7, 123, 266, 40
+    COMBOBOX IDC_COMBO_ACTION, 15, 138, 248, 100, CBS_DROPDOWNLIST | WS_VSCROLL
+
+    PUSHBUTTON "Cloud Services...", IDC_BTN_CLOUD_SETUP, 7, 175, 90, 14
+    DEFPUSHBUTTON "Capture", IDC_BTN_CAPTURE, 165, 175, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 220, 175, 50, 14
+END
+
+/* Wizard: Welcome page */
+IDD_WIZARD_WELCOME DIALOGEX 0, 0, 317, 143
+STYLE DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Welcome to Screenshooter.\n\nLet's set up your cloud services for uploading screenshots and posting to Jira.\n\nAll fields are optional - you can skip this wizard and configure later using --setup-wizard.", IDC_WIZARD_LABEL, 7, 7, 303, 80
+END
+
+/* Wizard: R2 page */
+IDD_WIZARD_R2 DIALOGEX 0, 0, 317, 143
+STYLE DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Account ID:", -1, 7, 10, 80, 10
+    EDITTEXT IDC_R2_ACCOUNT_ID, 95, 8, 215, 14, WS_BORDER
+
+    LTEXT "Access Key ID:", -1, 7, 30, 80, 10
+    EDITTEXT IDC_R2_ACCESS_KEY, 95, 28, 215, 14, WS_BORDER
+
+    LTEXT "Secret Access Key:", -1, 7, 50, 80, 10
+    EDITTEXT IDC_R2_SECRET_KEY, 95, 48, 215, 14, WS_BORDER | ES_PASSWORD
+
+    LTEXT "Bucket:", -1, 7, 70, 80, 10
+    EDITTEXT IDC_R2_BUCKET, 95, 68, 215, 14, WS_BORDER
+
+    LTEXT "Public URL:", -1, 7, 90, 80, 10
+    EDITTEXT IDC_R2_PUBLIC_URL, 95, 88, 215, 14, WS_BORDER
+
+    PUSHBUTTON "Test Connection", IDC_R2_TEST_BTN, 7, 112, 80, 14
+    LTEXT "", IDC_R2_TEST_RESULT, 95, 114, 215, 10
+END
+
+/* Wizard: Jira page */
+IDD_WIZARD_JIRA DIALOGEX 0, 0, 317, 143
+STYLE DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Base URL:", -1, 7, 10, 80, 10
+    EDITTEXT IDC_JIRA_BASE_URL, 95, 8, 215, 14, WS_BORDER
+
+    LTEXT "Email:", -1, 7, 30, 80, 10
+    EDITTEXT IDC_JIRA_EMAIL, 95, 28, 215, 14, WS_BORDER
+
+    LTEXT "API Token:", -1, 7, 50, 80, 10
+    EDITTEXT IDC_JIRA_API_TOKEN, 95, 48, 215, 14, WS_BORDER | ES_PASSWORD
+
+    LTEXT "Default Project:", -1, 7, 70, 80, 10
+    EDITTEXT IDC_JIRA_PROJECT, 95, 68, 215, 14, WS_BORDER
+
+    PUSHBUTTON "Test Connection", IDC_JIRA_TEST_BTN, 7, 92, 80, 14
+    LTEXT "", IDC_JIRA_TEST_RESULT, 95, 94, 215, 10
+END
+
+/* Wizard: Done page */
+IDD_WIZARD_DONE DIALOGEX 0, 0, 317, 143
+STYLE DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Setup complete!", -1, 7, 7, 303, 10
+    LTEXT "", IDC_DONE_SUMMARY, 7, 25, 303, 110
+END
