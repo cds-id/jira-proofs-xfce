@@ -20,18 +20,25 @@
 #ifndef HAVE_SCREENSHOOTER_H
 #define HAVE_SCREENSHOOTER_H
 
+/* GTK UI headers */
 #include "screenshooter-dialogs.h"
 #include "screenshooter-utils.h"
 #include "screenshooter-actions.h"
 #include "screenshooter-capture.h"
 #include "screenshooter-format.h"
 #include "screenshooter-global.h"
-#include "screenshooter-cloud-config.h"
-#include "screenshooter-r2.h"
-#include "screenshooter-jira.h"
 #include "screenshooter-jira-dialog.h"
-#include "screenshooter-recorder.h"
 #include "screenshooter-recorder-dialog.h"
 #include "screenshooter-video-editor.h"
+
+/* Core library */
+#include <sc-cloud-config.h>
+#include <sc-r2.h>
+#include <sc-jira.h>
+#include <sc-recorder.h>
+#include <sc-video-editor-blur.h>
+
+/* Platform */
+#include <sc-platform.h>
 
 #endif

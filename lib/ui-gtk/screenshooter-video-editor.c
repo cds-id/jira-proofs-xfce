@@ -1,5 +1,5 @@
 #include "screenshooter-video-editor.h"
-#include "screenshooter-video-editor-blur.h"
+#include <sc-video-editor-blur.h>
 #include "screenshooter-video-editor-canvas.h"
 #include "screenshooter-video-editor-timeline.h"
 

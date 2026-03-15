@@ -20,4 +20,8 @@ libscreenshooter_platform = static_library(
 libscreenshooter_platform_dep = declare_dependency(
   link_with: libscreenshooter_platform,
   include_directories: include_directories('.'),
+  dependencies: [
+    glib,
+    dependency('gdk-pixbuf-2.0'),
+  ],
 )

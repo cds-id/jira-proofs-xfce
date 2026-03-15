@@ -36,7 +36,7 @@ do_stop (RecorderDialogData *data)
       data->timer_id = 0;
     }
 
-  output_path = screenshooter_recorder_stop (data->state, &error);
+  output_path = sc_recorder_stop (data->state, &error);
 
   if (error)
     {
@@ -58,7 +58,7 @@ do_stop (RecorderDialogData *data)
     data->callback (output_path, data->user_data);
 
   g_free (output_path);
-  screenshooter_recorder_free (data->state);
+  sc_recorder_free (data->state);
   g_free (data);
 }
 
@@ -140,7 +140,7 @@ cb_child_watch (GPid pid, gint status, gpointer user_data)
       if (data->callback)
         data->callback (NULL, data->user_data);
 
-      screenshooter_recorder_free (data->state);
+      sc_recorder_free (data->state);
       g_free (data);
     }
 }

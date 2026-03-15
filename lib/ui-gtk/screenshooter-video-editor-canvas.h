@@ -2,7 +2,7 @@
 #define __HAVE_VIDEO_EDITOR_CANVAS_H__
 
 #include <gtk/gtk.h>
-#include "screenshooter-video-editor-blur.h"
+#include <sc-video-editor-blur.h>
 
 typedef void (*CanvasRegionDrawnCallback) (gint x, gint y, gint w, gint h,
                                            gpointer user_data);

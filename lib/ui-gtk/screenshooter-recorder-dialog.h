@@ -1,7 +1,7 @@
 #ifndef __HAVE_RECORDER_DIALOG_H__
 #define __HAVE_RECORDER_DIALOG_H__
 
-#include "screenshooter-recorder.h"
+#include <sc-recorder.h>
 #include <gtk/gtk.h>
 
 typedef void (*RecorderStopCallback) (const gchar *output_path,

@@ -2,7 +2,7 @@
 #define __HAVE_VIDEO_EDITOR_TIMELINE_H__
 
 #include <gtk/gtk.h>
-#include "screenshooter-video-editor-blur.h"
+#include <sc-video-editor-blur.h>
 
 typedef void (*TimelineScrubCallback)  (gdouble timestamp, gpointer user_data);
 typedef void (*TimelineRegionChanged)  (gpointer user_data);

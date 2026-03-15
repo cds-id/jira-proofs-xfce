@@ -24,12 +24,13 @@
 #include "screenshooter-global.h"
 #include "screenshooter-dialogs.h"
 #include "screenshooter-format.h"
-#include "screenshooter-cloud-config.h"
-#include "screenshooter-r2.h"
-#include "screenshooter-jira.h"
+#include <sc-cloud-config.h>
+#include <sc-r2.h>
+#include <sc-jira.h>
 #include "screenshooter-jira-dialog.h"
-#include "screenshooter-recorder.h"
+#include <sc-recorder.h>
 #include "screenshooter-recorder-dialog.h"
+#include <sc-platform.h>
 #include "screenshooter-select.h"
 #ifdef ENABLE_X11
 #include "screenshooter-utils-x11.h"
@@ -172,7 +173,9 @@ action_idle (gpointer user_data)
   if (sd->action & (UPLOAD_R2 | POST_JIRA))
     {
       GError *cloud_error = NULL;
-      CloudConfig *cloud_config = screenshooter_cloud_config_load (&cloud_error);
+      gchar *cloud_config_dir = sc_platform_config_dir ();
+      CloudConfig *cloud_config = sc_cloud_config_load (cloud_config_dir, &cloud_error);
+      g_free (cloud_config_dir);
 
       if (cloud_config == NULL)
         {
@@ -196,7 +199,7 @@ action_idle (gpointer user_data)
           /* Step 1: Upload to R2 */
           if (upload_file_path)
             {
-              public_url = screenshooter_r2_upload (cloud_config,
+              public_url = sc_r2_upload (cloud_config,
                 upload_file_path, NULL, NULL, &cloud_error);
               if (cloud_error)
                 {
@@ -225,7 +228,7 @@ action_idle (gpointer user_data)
                 {
                   /* CLI mode: post directly to specified issue */
                   GError *jira_err = NULL;
-                  screenshooter_jira_post_comment (cloud_config,
+                  sc_jira_post_comment (cloud_config,
                     sd->jira_issue_key,
                     cloud_config->presets.bug_evidence
                       ? cloud_config->presets.bug_evidence : "Screenshot",
@@ -273,7 +276,7 @@ action_idle (gpointer user_data)
             }
 
           g_free (public_url);
-          screenshooter_cloud_config_free (cloud_config);
+          sc_cloud_config_free (cloud_config);
         }
     }
 
@@ -392,7 +395,9 @@ action_idle_recording (const gchar *save_location, ScreenshotData *sd)
   if (sd->action & (UPLOAD_R2 | POST_JIRA))
     {
       GError *cloud_error = NULL;
-      CloudConfig *cloud_config = screenshooter_cloud_config_load (&cloud_error);
+      gchar *cloud_config_dir = sc_platform_config_dir ();
+      CloudConfig *cloud_config = sc_cloud_config_load (cloud_config_dir, &cloud_error);
+      g_free (cloud_config_dir);
 
       if (cloud_config == NULL)
         {
@@ -406,7 +411,7 @@ action_idle_recording (const gchar *save_location, ScreenshotData *sd)
         }
       else
         {
-          gchar *public_url = screenshooter_r2_upload (cloud_config,
+          gchar *public_url = sc_r2_upload (cloud_config,
             save_location, NULL, NULL, &cloud_error);
 
           if (public_url == NULL)
@@ -424,7 +429,7 @@ action_idle_recording (const gchar *save_location, ScreenshotData *sd)
               if (sd->jira_issue_key && sd->jira_issue_key[0] != '\0')
                 {
                   GError *jira_err = NULL;
-                  screenshooter_jira_post_comment (cloud_config,
+                  sc_jira_post_comment (cloud_config,
                     sd->jira_issue_key,
                     cloud_config->presets.bug_evidence
                       ? cloud_config->presets.bug_evidence : "Recording",
@@ -470,7 +475,7 @@ action_idle_recording (const gchar *save_location, ScreenshotData *sd)
             }
 
           g_free (public_url);
-          screenshooter_cloud_config_free (cloud_config);
+          sc_cloud_config_free (cloud_config);
         }
     }
 
@@ -502,7 +507,7 @@ screenshooter_start_recording (ScreenshotData *sd)
   GdkRectangle geometry;
 
   /* Check ffmpeg availability */
-  if (!screenshooter_recorder_available ())
+  if (!sc_recorder_available ())
     {
       GtkWidget *warn = gtk_message_dialog_new (NULL,
         GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
@@ -598,7 +603,7 @@ screenshooter_start_recording (ScreenshotData *sd)
   w = w & ~1;
   h = h & ~1;
 
-  RecorderState *state = screenshooter_recorder_start (
+  RecorderState *state = sc_recorder_start (
     sd->region, x, y, w, h, &error);
 
   if (state == NULL)

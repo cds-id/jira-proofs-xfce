@@ -9,7 +9,7 @@ shared_module(
   plugin_sources,
   gnu_symbol_visibility: 'hidden',
   include_directories: [
-    include_directories('..', '..' / 'lib'),
+    include_directories('..', '..' / 'lib' / 'ui-gtk'),
   ],
   dependencies: [
     gtk,
@@ -21,6 +21,8 @@ shared_module(
     x11_deps,
     wayland_deps,
     xfixes,
+    libscreenshooter_core_dep,
+    libscreenshooter_platform_dep,
   ],
   link_with: [
     libscreenshooter,

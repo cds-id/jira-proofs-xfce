@@ -1,5 +1,5 @@
 #include "screenshooter-jira-dialog.h"
-#include "screenshooter-jira.h"
+#include <sc-jira.h>
 
 #include <libxfce4ui/libxfce4ui.h>
 #include <string.h>
@@ -85,7 +85,7 @@ do_search (gpointer user_data)
 
   data->search_timeout_id = 0;
 
-  GList *issues = screenshooter_jira_search (data->config, query, &error);
+  GList *issues = sc_jira_search (data->config, query, &error);
   if (error)
     {
       g_warning ("Jira search error: %s", error->message);
@@ -94,7 +94,7 @@ do_search (gpointer user_data)
     }
 
   populate_results (data, issues);
-  screenshooter_jira_issue_list_free (issues);
+  sc_jira_issue_list_free (issues);
   return FALSE;
 }
 
@@ -227,7 +227,7 @@ screenshooter_jira_dialog_run (GtkWindow *parent,
       gchar *desc = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
       GError *error = NULL;
 
-      result = screenshooter_jira_post_comment (config,
+      result = sc_jira_post_comment (config,
         data.selected_key,
         preset_title ? preset_title : "Screenshot",
         desc, image_url, &error);

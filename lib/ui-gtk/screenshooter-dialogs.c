@@ -21,8 +21,9 @@
 #include "screenshooter-actions.h"
 #include "screenshooter-custom-actions.h"
 #include "screenshooter-format.h"
-#include "screenshooter-cloud-config.h"
-#include "screenshooter-recorder.h"
+#include <sc-cloud-config.h>
+#include <sc-recorder.h>
+#include <sc-platform.h>
 #include "screenshooter-video-editor.h"
 
 #include <libxfce4ui/libxfce4ui.h>
@@ -1005,7 +1006,7 @@ GtkWidget *screenshooter_region_dialog_new (ScreenshotData *sd, gboolean plugin)
   {
     GtkWidget *record_check = gtk_check_button_new_with_label (
       _("Record Video"));
-    gboolean ffmpeg_available = screenshooter_recorder_available ();
+    gboolean ffmpeg_available = sc_recorder_available ();
     gboolean is_wayland = FALSE;
 
 #ifdef ENABLE_WAYLAND
@@ -1377,10 +1378,12 @@ GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
   /* Cloud action radio buttons (part of the same radio group) */
   {
     GError *cloud_err = NULL;
-    CloudConfig *cloud_config = screenshooter_cloud_config_load (&cloud_err);
-    gboolean r2_available = screenshooter_cloud_config_valid_r2 (cloud_config);
-    gboolean jira_available = screenshooter_cloud_config_valid_jira (cloud_config);
-    gchar *config_path = screenshooter_cloud_config_get_path ();
+    gchar *config_dir = sc_platform_config_dir ();
+    CloudConfig *cloud_config = sc_cloud_config_load (config_dir, &cloud_err);
+    gboolean r2_available = sc_cloud_config_valid_r2 (cloud_config);
+    gboolean jira_available = sc_cloud_config_valid_jira (cloud_config);
+    gchar *config_path = sc_cloud_config_get_path (config_dir);
+    g_free (config_dir);
     gchar *tooltip_unavailable = g_strdup_printf (
       _("Configure in %s"), config_path);
     gint next_row = 5;
@@ -1424,7 +1427,7 @@ GtkWidget *screenshooter_actions_dialog_new (ScreenshotData *sd)
 
     g_free (tooltip_unavailable);
     g_free (config_path);
-    screenshooter_cloud_config_free (cloud_config);
+    sc_cloud_config_free (cloud_config);
     g_clear_error (&cloud_err);
   }
 

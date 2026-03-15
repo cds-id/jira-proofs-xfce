@@ -7,7 +7,7 @@ screenshooter = executable(
   screenshooter_sources,
   sources: xfce_revision_h,
   include_directories: [
-    include_directories('..', '..' / 'lib'),
+    include_directories('..', '..' / 'lib' / 'ui-gtk'),
   ],
   dependencies: [
     gtk,
@@ -18,6 +18,8 @@ screenshooter = executable(
     x11_deps,
     wayland_deps,
     xfixes,
+    libscreenshooter_core_dep,
+    libscreenshooter_platform_dep,
   ],
   link_with: [
     libscreenshooter,
