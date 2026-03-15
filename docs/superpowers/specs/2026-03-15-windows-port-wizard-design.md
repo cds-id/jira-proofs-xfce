@@ -12,7 +12,7 @@ Cross-platform rewrite of xfce4-screenshooter to support both Linux and Windows 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Cross-platform strategy | Shared core + platform-specific UI | Native feel on each OS, clean separation |
-| Windows screenshot API | Windows Graphics Capture API | Modern, DPI-aware, HDR support, Win10 1803+ |
+| Windows screenshot API | BitBlt/PrintWindow (initial), Graphics Capture API (future) | C-friendly, DPI-aware via SetProcessDpiAwarenessContext, Win10+ |
 | Windows video recording | Start with `-f gdigrab`, upgrade to DXGI later | Simpler initial implementation, FFmpeg handles it |
 | Windows UI toolkit | Win32 + .rc resource dialogs | No extra dependencies, native Windows look |
 | Platform dependency handling | Abstraction layer | Clean interface, no `#ifdef` scattered through business logic |
@@ -61,6 +61,10 @@ Additions to the existing repository:
 Meson has native Windows/MSVC support. The top-level `meson.build` uses `host_machine.system()` to conditionally build the correct UI and entry point:
 
 ```meson
+# Core and platform built first (UI depends on them)
+subdir('lib/core')
+subdir('lib/platform')
+
 if host_machine.system() == 'windows'
   subdir('lib/ui-win32')
   subdir('src')  # builds main-win32.c
@@ -69,10 +73,6 @@ else
   subdir('src')  # builds main.c
   subdir('panel-plugin')  # Linux only
 endif
-
-# Always built on both platforms
-subdir('lib/core')
-subdir('lib/platform')
 ```
 
 ## 2. Platform Abstraction Layer
@@ -120,9 +120,9 @@ void       sc_platform_notify (const gchar *title, const gchar *body);
 
 ### Windows Backend (`sc-platform-windows.c`)
 
-- **Capture:** Windows Graphics Capture API (`IGraphicsCaptureItem` + `Direct3D11CaptureFramePool`)
+- **Capture:** `BitBlt` / `PrintWindow` for screenshots (C-friendly, no COM/WinRT needed). Per-monitor DPI handled via `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`. The Windows Graphics Capture API (WinRT/COM) is deferred as a future upgrade — it requires C++ interop which conflicts with the project's C-only codebase.
 - **Recorder args:** Returns `-f gdigrab` for FFmpeg (upgradeable to DXGI pipe later)
-- **Config:** Reads/writes `%APPDATA%\xfce4-screenshooter\cloud.toml` via GKeyFile
+- **Config:** Reads/writes `%APPDATA%\xfce4-screenshooter\cloud.toml` via GKeyFile. On save, restrictive ACLs are set via `SetFileSecurity()` to match Linux's `chmod 0600` behavior (owner-only access). See also Section 3 for credential protection details.
 - **Clipboard:** Win32 `SetClipboardData()` with `CF_BITMAP`
 - **Notifications:** Win32 toast notifications (`Shell_NotifyIcon`)
 
@@ -132,7 +132,11 @@ void       sc_platform_notify (const gchar *title, const gchar *body);
 
 ### Trigger
 
-On app startup, call `sc_platform_config_exists()`. If it returns `FALSE`, launch the wizard instead of the normal capture dialog.
+On app startup, call `sc_platform_config_exists()`. If it returns `FALSE`, launch the wizard instead of the normal capture dialog. The wizard can also be re-launched manually via:
+- **CLI flag:** `--setup-wizard` (forces wizard regardless of config state)
+- **Menu item:** "Reconfigure Cloud Services" in the main dialog's menu (both GTK and Win32)
+
+If the config file exists but fails to parse (corrupt file), the app logs a warning, deletes the corrupt file, and triggers the wizard.
 
 ### Wizard Pages
 
@@ -153,10 +157,18 @@ On app startup, call `sc_platform_config_exists()`. If it returns `FALSE`, launc
 
 Both UIs call the same core functions:
 
-- `sc_cloud_config_create_default()` — creates empty config struct
-- `sc_r2_test_connection()` — validates R2 credentials (new, wraps existing curl logic)
-- `sc_jira_test_connection()` — validates Jira credentials (new, calls REST API)
-- `sc_cloud_config_save()` — writes TOML to disk via platform config path
+- `sc_cloud_config_create_default()` — creates empty `CloudConfig` struct with NULL/empty fields
+- `sc_r2_test_connection(const CloudConfig *config)` — validates R2 credentials via HEAD request to bucket (new, wraps existing curl logic). Returns `TRUE` on success, `FALSE` with `GError` on failure.
+- `sc_jira_test_connection(const CloudConfig *config)` — validates Jira credentials via `GET /rest/api/3/myself` (new). Returns `TRUE` on success, `FALSE` with `GError` on failure.
+- `sc_cloud_config_save(const CloudConfig *config)` — new function that serializes config to GKeyFile INI format (not strict TOML — GKeyFile natively writes INI which is a compatible subset for the key-value pairs used here). Creates the config directory if it doesn't exist (`g_mkdir_with_parents`). On Linux, sets file permissions to `0600`. On Windows, sets restrictive ACLs via `SetFileSecurity()` (owner-only read/write). Overwrites any existing config file.
+
+### Config Format Clarification
+
+The config file uses GKeyFile's native INI format (group headers with `[section]`, key-value pairs with `key=value`). The existing `cloud.toml` file happens to be compatible with GKeyFile because it only uses simple string values — no TOML-specific features (arrays, nested tables, datetime). The file extension remains `.toml` for backward compatibility but the format is technically INI.
+
+### Relationship to Platform Config Abstraction
+
+The `sc_platform_config_*()` functions in the platform layer handle general app preferences (capture mode, save location, etc.) and route through xfconf on Linux or a separate INI file on Windows. The `sc_cloud_config_*()` functions in the core layer handle cloud credentials specifically and always use direct file I/O (GKeyFile) on both platforms — they do NOT go through the platform abstraction, since the cloud config format and path are the same on both platforms (only the directory root differs, handled by `sc_platform_config_path()`).
 
 ### Config Paths
 
@@ -165,14 +177,15 @@ Both UIs call the same core functions:
 
 ## 4. Windows Capture & Recording
 
-### Screenshots (Windows Graphics Capture API)
+### Screenshots (BitBlt / PrintWindow)
 
-- Uses `IGraphicsCaptureItem` + `Direct3D11CaptureFramePool`
-- Supports per-monitor DPI awareness and multi-monitor setups
-- **Fullscreen:** capture primary monitor (or let user pick)
-- **Window:** enumerate via `EnumWindows`, user clicks to select, capture via HWND
-- **Region:** overlay transparent fullscreen window, user drag-selects, capture rect
+- Uses `BitBlt` for fullscreen/region and `PrintWindow` for individual window capture
+- DPI awareness set at process startup via `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`
+- **Fullscreen:** `GetDC(NULL)` + `BitBlt` to capture entire desktop (multi-monitor via `EnumDisplayMonitors`)
+- **Window:** enumerate via `EnumWindows`, user clicks to select, `PrintWindow` captures the target HWND (handles occluded windows)
+- **Region:** overlay transparent fullscreen window, user drag-selects, `BitBlt` captures that rect
 - Result converted to GdkPixbuf for the core library
+- **Future upgrade:** Windows Graphics Capture API for HDR and hardware-accelerated capture (requires C++ interop layer)
 
 ### Video Recording
 
@@ -239,8 +252,8 @@ NSIS installer bundling the app, FFmpeg, and runtime DLLs (GLib, GdkPixbuf, libc
 
 ### Windows Only
 
-- Win32 API (system)
-- Windows Graphics Capture API (Win10 1803+)
+- Win32 API (system) — GDI, Shell, User32
+- Minimum: Windows 10 (for DPI awareness V2)
 - MSYS2 MinGW packages for GLib, GdkPixbuf, libcurl, json-glib
 
 ## 7. CI
