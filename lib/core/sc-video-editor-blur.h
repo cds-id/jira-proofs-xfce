@@ -1,5 +1,5 @@
-#ifndef __HAVE_VIDEO_EDITOR_BLUR_H__
-#define __HAVE_VIDEO_EDITOR_BLUR_H__
+#ifndef __SC_VIDEO_EDITOR_BLUR_H__
+#define __SC_VIDEO_EDITOR_BLUR_H__
 
 #include <glib.h>
 

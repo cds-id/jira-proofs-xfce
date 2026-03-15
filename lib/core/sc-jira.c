@@ -268,6 +268,14 @@ sc_jira_post_comment (const CloudConfig *config,
   CURLcode res;
   CurlBuffer response = { NULL, 0 };
   struct curl_slist *headers = NULL;
+
+  g_return_val_if_fail (config != NULL, FALSE);
+  if (!sc_cloud_config_valid_jira (config))
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                   "Jira configuration is incomplete");
+      return FALSE;
+    }
   gchar *auth, *url, *body;
   long http_code;
   gboolean success = FALSE;
