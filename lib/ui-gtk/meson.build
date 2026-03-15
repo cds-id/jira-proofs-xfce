@@ -25,6 +25,8 @@ libscreenshooter_gtk_sources = [
   'screenshooter-video-editor-canvas.h',
   'screenshooter-video-editor-timeline.c',
   'screenshooter-video-editor-timeline.h',
+  'screenshooter-wizard.c',
+  'screenshooter-wizard.h',
 ]
 
 libscreenshooter_gtk_sources += gnome.genmarshal(
