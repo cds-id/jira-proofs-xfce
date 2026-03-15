@@ -63,10 +63,77 @@ jobs:
           sed -i 's/^          //' "${PKG_DIR}/DEBIAN/control"
           dpkg-deb --build "${PKG_DIR}" "jira-proofs-xfce-${VERSION}-amd64.deb"
 
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            jira-proofs-xfce-*-linux-amd64.tar.gz
+            jira-proofs-xfce-*-amd64.deb
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-gdk-pixbuf2
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-json-glib
+            mingw-w64-x86_64-gettext
+
+      - name: Configure
+        run: meson setup build
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Package Windows build
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p dist
+          cp build/src/xfce4-screenshooter.exe dist/
+          # Copy runtime DLLs
+          ldd build/src/xfce4-screenshooter.exe | grep mingw | awk '{print $3}' | while read dll; do
+            cp "$dll" dist/
+          done
+
+      - name: Create Windows zip
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          Compress-Archive -Path dist\* -DestinationPath "jira-proofs-xfce-${version}-windows-amd64.zip"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: jira-proofs-xfce-*-windows-amd64.zip
+
+  release:
+    needs: [build-package, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            jira-proofs-xfce-*-linux-amd64.tar.gz
-            jira-proofs-xfce-*-amd64.deb
+            linux-artifacts/*
+            windows-artifacts/*
           generate_release_notes: true
