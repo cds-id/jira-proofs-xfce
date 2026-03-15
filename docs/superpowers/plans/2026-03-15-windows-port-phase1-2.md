@@ -380,7 +380,7 @@ Port from `lib/screenshooter-cloud-config.c` with these changes:
 
 - [ ] **Step 3: Compile and run test**
 
-Run: `cc $(pkg-config --cflags --libs glib-2.0 gio-2.0) -Ilib/core lib/core/sc-cloud-config.c test/test-cloud-config-save.c -o /tmp/test-cc-save && /tmp/test-cc-save`
+Run: `cc $(pkg-config --cflags --libs glib-2.0 gio-2.0 gdk-pixbuf-2.0) -Ilib/core -Ilib/platform lib/core/sc-cloud-config.c lib/platform/sc-platform-linux.c test/test-cloud-config-save.c -o /tmp/test-cc-save && /tmp/test-cc-save`
 Expected: All 3 tests PASS
 
 - [ ] **Step 4: Commit**
@@ -1093,7 +1093,7 @@ sc_jira_test_connection (const CloudConfig *config, GError **error)
 
 - [ ] **Step 4: Run tests**
 
-Run: `cc $(pkg-config --cflags --libs glib-2.0 gio-2.0 libcurl json-glib-1.0) -lm -Ilib/core lib/core/sc-cloud-config.c lib/core/sc-r2.c lib/core/sc-jira.c test/test-connection-validators.c -o /tmp/test-conn && /tmp/test-conn`
+Run: `cc $(pkg-config --cflags --libs glib-2.0 gio-2.0 gdk-pixbuf-2.0 libcurl json-glib-1.0) -lm -Ilib/core -Ilib/platform lib/core/sc-cloud-config.c lib/core/sc-r2.c lib/core/sc-jira.c lib/platform/sc-platform-linux.c test/test-connection-validators.c -o /tmp/test-conn && /tmp/test-conn`
 Expected: Both tests PASS (missing fields returns FALSE with error)
 
 - [ ] **Step 5: Commit**
