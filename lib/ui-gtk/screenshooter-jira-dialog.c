@@ -7,13 +7,15 @@
 
 typedef struct {
   const CloudConfig *config;
-  const gchar *image_url;
+  const gchar *media_url;
+  gboolean is_video;
   GtkWidget *search_entry;
   GtkWidget *list_box;
   GtkWidget *preset_combo;
   GtkWidget *desc_view;
   GtkWidget *post_button;
   gchar *selected_key;
+  JiraWorkspace *selected_workspace;
   guint search_timeout_id;
 } JiraDialogData;
 
@@ -35,41 +37,77 @@ cb_row_selected (GtkListBox *box, GtkListBoxRow *row, JiraDialogData *data)
     {
       g_free (data->selected_key);
       data->selected_key = NULL;
+      data->selected_workspace = NULL;
       gtk_widget_set_sensitive (data->post_button, FALSE);
       return;
     }
 
+  /* Skip header rows */
+  if (g_object_get_data (G_OBJECT (row), "is-header"))
+    {
+      gtk_list_box_unselect_row (box, row);
+      return;
+    }
+
   const gchar *key = g_object_get_data (G_OBJECT (row), "issue-key");
+  JiraWorkspace *ws = g_object_get_data (G_OBJECT (row), "workspace");
   g_free (data->selected_key);
   data->selected_key = g_strdup (key);
+  data->selected_workspace = ws;
   gtk_widget_set_sensitive (data->post_button, TRUE);
 }
 
 
 static void
-populate_results (JiraDialogData *data, GList *issues)
+populate_results_grouped (JiraDialogData *data, GList *groups)
 {
   clear_list_box (GTK_LIST_BOX (data->list_box));
 
-  for (GList *l = issues; l != NULL; l = l->next)
+  for (GList *g = groups; g != NULL; g = g->next)
     {
-      JiraIssue *issue = l->data;
-      gchar *label_text = g_strdup_printf ("%s  —  %s",
-                                            issue->key, issue->summary);
-      GtkWidget *label = gtk_label_new (label_text);
-      gtk_label_set_xalign (GTK_LABEL (label), 0.0);
-      gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
-      gtk_widget_set_margin_start (label, 6);
-      gtk_widget_set_margin_end (label, 6);
-      gtk_widget_set_margin_top (label, 4);
-      gtk_widget_set_margin_bottom (label, 4);
+      JiraSearchGroup *group = g->data;
 
-      GtkWidget *row = gtk_list_box_row_new ();
-      g_object_set_data_full (G_OBJECT (row), "issue-key",
-                              g_strdup (issue->key), g_free);
-      gtk_container_add (GTK_CONTAINER (row), label);
-      gtk_list_box_insert (GTK_LIST_BOX (data->list_box), row, -1);
-      g_free (label_text);
+      /* Header row */
+      GtkWidget *header_label = gtk_label_new (NULL);
+      gchar *markup = g_markup_printf_escaped (
+          "<b>%s</b>", group->workspace->label);
+      gtk_label_set_markup (GTK_LABEL (header_label), markup);
+      g_free (markup);
+      gtk_label_set_xalign (GTK_LABEL (header_label), 0.0);
+      gtk_widget_set_margin_start (header_label, 6);
+      gtk_widget_set_margin_top (header_label, 8);
+      gtk_widget_set_margin_bottom (header_label, 2);
+
+      GtkWidget *header_row = gtk_list_box_row_new ();
+      g_object_set_data (G_OBJECT (header_row), "is-header",
+                         GINT_TO_POINTER (1));
+      gtk_list_box_row_set_selectable (GTK_LIST_BOX_ROW (header_row), FALSE);
+      gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (header_row), FALSE);
+      gtk_container_add (GTK_CONTAINER (header_row), header_label);
+      gtk_list_box_insert (GTK_LIST_BOX (data->list_box), header_row, -1);
+
+      /* Issue rows */
+      for (GList *l = group->issues; l != NULL; l = l->next)
+        {
+          JiraIssue *issue = l->data;
+          gchar *label_text = g_strdup_printf ("%s  —  %s",
+                                                issue->key, issue->summary);
+          GtkWidget *label = gtk_label_new (label_text);
+          gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+          gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+          gtk_widget_set_margin_start (label, 16);
+          gtk_widget_set_margin_end (label, 6);
+          gtk_widget_set_margin_top (label, 4);
+          gtk_widget_set_margin_bottom (label, 4);
+
+          GtkWidget *row = gtk_list_box_row_new ();
+          g_object_set_data_full (G_OBJECT (row), "issue-key",
+                                  g_strdup (issue->key), g_free);
+          g_object_set_data (G_OBJECT (row), "workspace", group->workspace);
+          gtk_container_add (GTK_CONTAINER (row), label);
+          gtk_list_box_insert (GTK_LIST_BOX (data->list_box), row, -1);
+          g_free (label_text);
+        }
     }
 
   gtk_widget_show_all (data->list_box);
@@ -85,7 +123,7 @@ do_search (gpointer user_data)
 
   data->search_timeout_id = 0;
 
-  GList *issues = sc_jira_search (data->config, query, &error);
+  GList *groups = sc_jira_search_all (&data->config->jira, query, &error);
   if (error)
     {
       g_warning ("Jira search error: %s", error->message);
@@ -93,8 +131,8 @@ do_search (gpointer user_data)
       return FALSE;
     }
 
-  populate_results (data, issues);
-  sc_jira_issue_list_free (issues);
+  populate_results_grouped (data, groups);
+  sc_jira_search_group_list_free (groups);
   return FALSE;
 }
 
@@ -111,7 +149,8 @@ cb_search_changed (GtkSearchEntry *entry, JiraDialogData *data)
 gboolean
 screenshooter_jira_dialog_run (GtkWindow *parent,
                                 const CloudConfig *config,
-                                const gchar *image_url)
+                                const gchar *media_url,
+                                gboolean is_video)
 {
   GtkWidget *dlg, *content, *box, *label, *scrolled;
   GtkWidget *search_entry, *list_box, *preset_combo, *desc_scrolled, *desc_view;
@@ -120,7 +159,8 @@ screenshooter_jira_dialog_run (GtkWindow *parent,
   gboolean result = FALSE;
 
   data.config = config;
-  data.image_url = image_url;
+  data.media_url = media_url;
+  data.is_video = is_video;
 
   dlg = xfce_titled_dialog_new_with_mixed_buttons (
     "Post to Jira",
@@ -227,10 +267,12 @@ screenshooter_jira_dialog_run (GtkWindow *parent,
       gchar *desc = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
       GError *error = NULL;
 
-      result = sc_jira_post_comment (config,
+      result = sc_jira_post_comment (config->jira.email,
+        config->jira.api_token,
+        data.selected_workspace,
         data.selected_key,
         preset_title ? preset_title : "Screenshot",
-        desc, image_url, &error);
+        desc, media_url, is_video, &error);
 
       if (error)
         {
@@ -246,13 +288,13 @@ screenshooter_jira_dialog_run (GtkWindow *parent,
         {
           /* Copy URL to clipboard and show success */
           GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
-          gtk_clipboard_set_text (clip, image_url, -1);
+          gtk_clipboard_set_text (clip, media_url, -1);
 
           GtkWidget *ok_dlg = gtk_message_dialog_new (
             GTK_WINDOW (dlg), GTK_DIALOG_MODAL,
             GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
             "Posted to %s!\n\n%s\n\n(URL copied to clipboard)",
-            data.selected_key, image_url);
+            data.selected_key, media_url);
           gtk_dialog_run (GTK_DIALOG (ok_dlg));
           gtk_widget_destroy (ok_dlg);
         }

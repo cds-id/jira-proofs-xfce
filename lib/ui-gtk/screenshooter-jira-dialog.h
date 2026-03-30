@@ -6,6 +6,7 @@
 
 gboolean screenshooter_jira_dialog_run (GtkWindow *parent,
                                          const CloudConfig *config,
-                                         const gchar *image_url);
+                                         const gchar *media_url,
+                                         gboolean is_video);
 
 #endif
