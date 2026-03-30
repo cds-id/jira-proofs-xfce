@@ -39,7 +39,9 @@ build_auth_header (const gchar *email, const gchar *api_token)
 
 
 GList *
-sc_jira_search (const CloudConfig *config,
+sc_jira_search (const gchar *email,
+                const gchar *api_token,
+                const JiraWorkspace *workspace,
                 const gchar *query,
                 GError **error)
 {
@@ -51,17 +53,15 @@ sc_jira_search (const CloudConfig *config,
   GList *issues = NULL;
   long http_code;
 
-  if (!sc_cloud_config_valid_jira (config))
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                   "Jira configuration is incomplete");
-      return NULL;
-    }
+  g_return_val_if_fail (email != NULL && email[0] != '\0', NULL);
+  g_return_val_if_fail (api_token != NULL && api_token[0] != '\0', NULL);
+  g_return_val_if_fail (workspace != NULL, NULL);
+  g_return_val_if_fail (workspace->base_url != NULL && workspace->base_url[0] != '\0', NULL);
 
   if (query == NULL || query[0] == '\0')
     jql = g_strdup_printf (
       "project = %s AND status != Done ORDER BY updated DESC",
-      config->jira.default_project);
+      workspace->default_project);
   else
     {
       gchar *safe = g_strescape (query, NULL);
@@ -72,7 +72,7 @@ sc_jira_search (const CloudConfig *config,
         jql = g_strdup_printf (
           "project = %s AND summary ~ \\\"%s\\\" AND status != Done "
           "ORDER BY updated DESC",
-          config->jira.default_project, safe);
+          workspace->default_project, safe);
       g_free (safe);
     }
 
@@ -96,8 +96,8 @@ sc_jira_search (const CloudConfig *config,
   g_object_unref (gen);
   g_object_unref (builder);
 
-  auth = build_auth_header (config->jira.email, config->jira.api_token);
-  url = g_strdup_printf ("%s/rest/api/3/search/jql", config->jira.base_url);
+  auth = build_auth_header (email, api_token);
+  url = g_strdup_printf ("%s/rest/api/3/search/jql", workspace->base_url);
 
   curl = curl_easy_init ();
   headers = curl_slist_append (headers, auth);
@@ -161,10 +161,45 @@ cleanup:
 }
 
 
+GList *
+sc_jira_search_all (const JiraCloudConfig *jira,
+                    const gchar *query,
+                    GError **error)
+{
+  GList *groups = NULL;
+
+  for (gsize i = 0; i < jira->n_workspaces; i++)
+    {
+      GError *ws_error = NULL;
+      GList *issues = sc_jira_search (jira->email, jira->api_token,
+                                       &jira->workspaces[i],
+                                       query, &ws_error);
+      if (ws_error)
+        {
+          g_warning ("Jira search on %s failed: %s",
+                     jira->workspaces[i].label, ws_error->message);
+          g_error_free (ws_error);
+          continue;
+        }
+
+      if (issues != NULL)
+        {
+          JiraSearchGroup *group = g_new0 (JiraSearchGroup, 1);
+          group->workspace = &jira->workspaces[i];
+          group->issues = issues;
+          groups = g_list_append (groups, group);
+        }
+    }
+
+  return groups;
+}
+
+
 static gchar *
 build_adf_comment_json (const gchar *preset_title,
                          const gchar *description,
-                         const gchar *image_url)
+                         const gchar *media_url,
+                         gboolean is_video)
 {
   JsonBuilder *b = json_builder_new ();
 
@@ -216,30 +251,53 @@ build_adf_comment_json (const gchar *preset_title,
       json_builder_end_object (b);
     }
 
-  /* Embedded image */
-  json_builder_begin_object (b);
-  json_builder_set_member_name (b, "type");
-  json_builder_add_string_value (b, "mediaSingle");
-  json_builder_set_member_name (b, "attrs");
-  json_builder_begin_object (b);
-  json_builder_set_member_name (b, "layout");
-  json_builder_add_string_value (b, "center");
-  json_builder_end_object (b);
-  json_builder_set_member_name (b, "content");
-  json_builder_begin_array (b);
-  json_builder_begin_object (b);
-  json_builder_set_member_name (b, "type");
-  json_builder_add_string_value (b, "media");
-  json_builder_set_member_name (b, "attrs");
-  json_builder_begin_object (b);
-  json_builder_set_member_name (b, "type");
-  json_builder_add_string_value (b, "external");
-  json_builder_set_member_name (b, "url");
-  json_builder_add_string_value (b, image_url);
-  json_builder_end_object (b);
-  json_builder_end_object (b);
-  json_builder_end_array (b);
-  json_builder_end_object (b);
+  if (is_video)
+    {
+      /* Video: inline card link */
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "type");
+      json_builder_add_string_value (b, "paragraph");
+      json_builder_set_member_name (b, "content");
+      json_builder_begin_array (b);
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "type");
+      json_builder_add_string_value (b, "inlineCard");
+      json_builder_set_member_name (b, "attrs");
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "url");
+      json_builder_add_string_value (b, media_url);
+      json_builder_end_object (b);
+      json_builder_end_object (b);
+      json_builder_end_array (b);
+      json_builder_end_object (b);
+    }
+  else
+    {
+      /* Image: mediaSingle embed block */
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "type");
+      json_builder_add_string_value (b, "mediaSingle");
+      json_builder_set_member_name (b, "attrs");
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "layout");
+      json_builder_add_string_value (b, "center");
+      json_builder_end_object (b);
+      json_builder_set_member_name (b, "content");
+      json_builder_begin_array (b);
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "type");
+      json_builder_add_string_value (b, "media");
+      json_builder_set_member_name (b, "attrs");
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "type");
+      json_builder_add_string_value (b, "external");
+      json_builder_set_member_name (b, "url");
+      json_builder_add_string_value (b, media_url);
+      json_builder_end_object (b);
+      json_builder_end_object (b);
+      json_builder_end_array (b);
+      json_builder_end_object (b);
+    }
 
   json_builder_end_array (b);
   json_builder_end_object (b);
@@ -257,33 +315,34 @@ build_adf_comment_json (const gchar *preset_title,
 
 
 gboolean
-sc_jira_post_comment (const CloudConfig *config,
+sc_jira_post_comment (const gchar *email,
+                      const gchar *api_token,
+                      const JiraWorkspace *workspace,
                       const gchar *issue_key,
                       const gchar *preset_title,
                       const gchar *description,
-                      const gchar *image_url,
+                      const gchar *media_url,
+                      gboolean is_video,
                       GError **error)
 {
   CURL *curl;
   CURLcode res;
   CurlBuffer response = { NULL, 0 };
   struct curl_slist *headers = NULL;
-
-  g_return_val_if_fail (config != NULL, FALSE);
-  if (!sc_cloud_config_valid_jira (config))
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
-                   "Jira configuration is incomplete");
-      return FALSE;
-    }
   gchar *auth, *url, *body;
   long http_code;
   gboolean success = FALSE;
 
-  auth = build_auth_header (config->jira.email, config->jira.api_token);
+  g_return_val_if_fail (email != NULL && email[0] != '\0', FALSE);
+  g_return_val_if_fail (api_token != NULL && api_token[0] != '\0', FALSE);
+  g_return_val_if_fail (workspace != NULL, FALSE);
+  g_return_val_if_fail (workspace->base_url != NULL && workspace->base_url[0] != '\0', FALSE);
+  g_return_val_if_fail (issue_key != NULL, FALSE);
+
+  auth = build_auth_header (email, api_token);
   url = g_strdup_printf ("%s/rest/api/3/issue/%s/comment",
-                          config->jira.base_url, issue_key);
-  body = build_adf_comment_json (preset_title, description, image_url);
+                          workspace->base_url, issue_key);
+  body = build_adf_comment_json (preset_title, description, media_url, is_video);
 
   curl = curl_easy_init ();
   headers = curl_slist_append (headers, auth);
@@ -324,7 +383,10 @@ sc_jira_post_comment (const CloudConfig *config,
 
 
 gboolean
-sc_jira_test_connection (const CloudConfig *config, GError **error)
+sc_jira_test_connection (const gchar *email,
+                         const gchar *api_token,
+                         const JiraWorkspace *workspace,
+                         GError **error)
 {
   CURL *curl;
   CURLcode res;
@@ -334,15 +396,13 @@ sc_jira_test_connection (const CloudConfig *config, GError **error)
   long http_code;
   gboolean success = FALSE;
 
-  if (!sc_cloud_config_valid_jira (config))
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                   "Jira configuration is incomplete");
-      return FALSE;
-    }
+  g_return_val_if_fail (email != NULL && email[0] != '\0', FALSE);
+  g_return_val_if_fail (api_token != NULL && api_token[0] != '\0', FALSE);
+  g_return_val_if_fail (workspace != NULL, FALSE);
+  g_return_val_if_fail (workspace->base_url != NULL && workspace->base_url[0] != '\0', FALSE);
 
-  auth = build_auth_header (config->jira.email, config->jira.api_token);
-  url = g_strdup_printf ("%s/rest/api/3/myself", config->jira.base_url);
+  auth = build_auth_header (email, api_token);
+  url = g_strdup_printf ("%s/rest/api/3/myself", workspace->base_url);
 
   curl = curl_easy_init ();
   if (curl == NULL)
@@ -414,4 +474,21 @@ void
 sc_jira_issue_list_free (GList *issues)
 {
   g_list_free_full (issues, (GDestroyNotify) sc_jira_issue_free);
+}
+
+
+void
+sc_jira_search_group_free (JiraSearchGroup *group)
+{
+  if (group == NULL)
+    return;
+  sc_jira_issue_list_free (group->issues);
+  g_free (group);
+}
+
+
+void
+sc_jira_search_group_list_free (GList *groups)
+{
+  g_list_free_full (groups, (GDestroyNotify) sc_jira_search_group_free);
 }
