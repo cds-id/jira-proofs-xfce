@@ -39,6 +39,18 @@
 
 
 
+static gboolean
+url_is_video (const gchar *url)
+{
+  if (url == NULL)
+    return FALSE;
+  return (g_str_has_suffix (url, ".mp4") ||
+          g_str_has_suffix (url, ".webm") ||
+          g_str_has_suffix (url, ".mkv"));
+}
+
+
+
 static void
 cb_help_response (GtkWidget *dialog, gint response, gpointer unused)
 {
@@ -226,40 +238,127 @@ action_idle (gpointer user_data)
               /* Step 2: Post to Jira (R2 upload already done) */
               if (sd->jira_issue_key && sd->jira_issue_key[0] != '\0')
                 {
-                  /* CLI mode: post directly to specified issue */
-                  GError *jira_err = NULL;
-                  sc_jira_post_comment (cloud_config,
-                    sd->jira_issue_key,
-                    cloud_config->presets.bug_evidence
-                      ? cloud_config->presets.bug_evidence : "Screenshot",
-                    "", public_url, &jira_err);
-                  if (jira_err)
+                  /* CLI mode: resolve workspace for issue key */
+                  gboolean is_video = url_is_video (public_url);
+                  JiraWorkspace *target_ws = NULL;
+                  gchar *issue_key = sd->jira_issue_key;
+
+                  /* Check for workspace:key syntax */
+                  gchar *colon = strchr (sd->jira_issue_key, ':');
+                  if (colon)
                     {
-                      GtkWidget *warn = gtk_message_dialog_new (NULL,
-                        GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
-                        "Jira post failed: %s", jira_err->message);
-                      gtk_dialog_run (GTK_DIALOG (warn));
-                      gtk_widget_destroy (warn);
-                      g_error_free (jira_err);
+                      gchar *ws_label = g_strndup (sd->jira_issue_key,
+                                                    colon - sd->jira_issue_key);
+                      issue_key = colon + 1;
+                      for (gsize i = 0; i < cloud_config->jira.n_workspaces; i++)
+                        {
+                          if (g_strcmp0 (cloud_config->jira.workspaces[i].label,
+                                        ws_label) == 0)
+                            {
+                              target_ws = &cloud_config->jira.workspaces[i];
+                              break;
+                            }
+                        }
+                      if (target_ws == NULL)
+                        {
+                          GtkWidget *warn = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                            "Unknown workspace: %s", ws_label);
+                          gtk_dialog_run (GTK_DIALOG (warn));
+                          gtk_widget_destroy (warn);
+                        }
+                      g_free (ws_label);
                     }
                   else
                     {
-                      GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
-                      gtk_clipboard_set_text (clip, public_url, -1);
+                      /* Auto-detect: search each workspace for the key */
+                      GPtrArray *matches = g_ptr_array_new ();
+                      for (gsize i = 0; i < cloud_config->jira.n_workspaces; i++)
+                        {
+                          GError *search_err = NULL;
+                          GList *results = sc_jira_search (
+                            cloud_config->jira.email,
+                            cloud_config->jira.api_token,
+                            &cloud_config->jira.workspaces[i],
+                            issue_key, &search_err);
+                          if (results != NULL)
+                            {
+                              g_ptr_array_add (matches,
+                                &cloud_config->jira.workspaces[i]);
+                              sc_jira_issue_list_free (results);
+                            }
+                          g_clear_error (&search_err);
+                        }
 
-                      GtkWidget *info = gtk_message_dialog_new (NULL,
-                        GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
-                        "Posted to %s!\n\n%s\n\n(URL copied to clipboard)",
-                        sd->jira_issue_key, public_url);
-                      gtk_dialog_run (GTK_DIALOG (info));
-                      gtk_widget_destroy (info);
+                      if (matches->len == 1)
+                        target_ws = g_ptr_array_index (matches, 0);
+                      else if (matches->len == 0)
+                        {
+                          GtkWidget *warn = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                            "Issue %s not found on any workspace.", issue_key);
+                          gtk_dialog_run (GTK_DIALOG (warn));
+                          gtk_widget_destroy (warn);
+                        }
+                      else
+                        {
+                          GString *labels = g_string_new ("");
+                          for (guint i = 0; i < matches->len; i++)
+                            {
+                              JiraWorkspace *ws = g_ptr_array_index (matches, i);
+                              if (i > 0)
+                                g_string_append (labels, ", ");
+                              g_string_append (labels, ws->label);
+                            }
+                          GtkWidget *warn = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                            "Ambiguous issue %s found on: %s.\n"
+                            "Specify workspace: -j workspace:%s",
+                            issue_key, labels->str, issue_key);
+                          gtk_dialog_run (GTK_DIALOG (warn));
+                          gtk_widget_destroy (warn);
+                          g_string_free (labels, TRUE);
+                        }
+                      g_ptr_array_free (matches, TRUE);
+                    }
+
+                  if (target_ws)
+                    {
+                      GError *jira_err = NULL;
+                      sc_jira_post_comment (cloud_config->jira.email,
+                        cloud_config->jira.api_token, target_ws,
+                        issue_key,
+                        cloud_config->presets.bug_evidence
+                          ? cloud_config->presets.bug_evidence : "Screenshot",
+                        "", public_url, is_video, &jira_err);
+                      if (jira_err)
+                        {
+                          GtkWidget *warn = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                            "Jira post failed: %s", jira_err->message);
+                          gtk_dialog_run (GTK_DIALOG (warn));
+                          gtk_widget_destroy (warn);
+                          g_error_free (jira_err);
+                        }
+                      else
+                        {
+                          GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
+                          gtk_clipboard_set_text (clip, public_url, -1);
+
+                          GtkWidget *info = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                            "Posted to %s!\n\n%s\n\n(URL copied to clipboard)",
+                            issue_key, public_url);
+                          gtk_dialog_run (GTK_DIALOG (info));
+                          gtk_widget_destroy (info);
+                        }
                     }
                 }
               else
                 {
-                  /* GUI mode: show dialog to pick issue and preset */
+                  gboolean is_video = url_is_video (public_url);
                   screenshooter_jira_dialog_run (NULL, cloud_config,
-                                                  public_url);
+                                                  public_url, is_video);
                 }
             }
           else
@@ -428,38 +527,127 @@ action_idle_recording (const gchar *save_location, ScreenshotData *sd)
             {
               if (sd->jira_issue_key && sd->jira_issue_key[0] != '\0')
                 {
-                  GError *jira_err = NULL;
-                  sc_jira_post_comment (cloud_config,
-                    sd->jira_issue_key,
-                    cloud_config->presets.bug_evidence
-                      ? cloud_config->presets.bug_evidence : "Recording",
-                    "", public_url, &jira_err);
-                  if (jira_err)
+                  /* CLI mode: resolve workspace for issue key */
+                  gboolean is_video = url_is_video (public_url);
+                  JiraWorkspace *target_ws = NULL;
+                  gchar *issue_key = sd->jira_issue_key;
+
+                  /* Check for workspace:key syntax */
+                  gchar *colon = strchr (sd->jira_issue_key, ':');
+                  if (colon)
                     {
-                      GtkWidget *warn = gtk_message_dialog_new (NULL,
-                        GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
-                        "Jira post failed: %s", jira_err->message);
-                      gtk_dialog_run (GTK_DIALOG (warn));
-                      gtk_widget_destroy (warn);
-                      g_error_free (jira_err);
+                      gchar *ws_label = g_strndup (sd->jira_issue_key,
+                                                    colon - sd->jira_issue_key);
+                      issue_key = colon + 1;
+                      for (gsize i = 0; i < cloud_config->jira.n_workspaces; i++)
+                        {
+                          if (g_strcmp0 (cloud_config->jira.workspaces[i].label,
+                                        ws_label) == 0)
+                            {
+                              target_ws = &cloud_config->jira.workspaces[i];
+                              break;
+                            }
+                        }
+                      if (target_ws == NULL)
+                        {
+                          GtkWidget *warn = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                            "Unknown workspace: %s", ws_label);
+                          gtk_dialog_run (GTK_DIALOG (warn));
+                          gtk_widget_destroy (warn);
+                        }
+                      g_free (ws_label);
                     }
                   else
                     {
-                      GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
-                      gtk_clipboard_set_text (clip, public_url, -1);
+                      /* Auto-detect: search each workspace for the key */
+                      GPtrArray *matches = g_ptr_array_new ();
+                      for (gsize i = 0; i < cloud_config->jira.n_workspaces; i++)
+                        {
+                          GError *search_err = NULL;
+                          GList *results = sc_jira_search (
+                            cloud_config->jira.email,
+                            cloud_config->jira.api_token,
+                            &cloud_config->jira.workspaces[i],
+                            issue_key, &search_err);
+                          if (results != NULL)
+                            {
+                              g_ptr_array_add (matches,
+                                &cloud_config->jira.workspaces[i]);
+                              sc_jira_issue_list_free (results);
+                            }
+                          g_clear_error (&search_err);
+                        }
 
-                      GtkWidget *info = gtk_message_dialog_new (NULL,
-                        GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
-                        "Posted to %s!\n\n%s\n\n(URL copied to clipboard)",
-                        sd->jira_issue_key, public_url);
-                      gtk_dialog_run (GTK_DIALOG (info));
-                      gtk_widget_destroy (info);
+                      if (matches->len == 1)
+                        target_ws = g_ptr_array_index (matches, 0);
+                      else if (matches->len == 0)
+                        {
+                          GtkWidget *warn = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                            "Issue %s not found on any workspace.", issue_key);
+                          gtk_dialog_run (GTK_DIALOG (warn));
+                          gtk_widget_destroy (warn);
+                        }
+                      else
+                        {
+                          GString *labels = g_string_new ("");
+                          for (guint i = 0; i < matches->len; i++)
+                            {
+                              JiraWorkspace *ws = g_ptr_array_index (matches, i);
+                              if (i > 0)
+                                g_string_append (labels, ", ");
+                              g_string_append (labels, ws->label);
+                            }
+                          GtkWidget *warn = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                            "Ambiguous issue %s found on: %s.\n"
+                            "Specify workspace: -j workspace:%s",
+                            issue_key, labels->str, issue_key);
+                          gtk_dialog_run (GTK_DIALOG (warn));
+                          gtk_widget_destroy (warn);
+                          g_string_free (labels, TRUE);
+                        }
+                      g_ptr_array_free (matches, TRUE);
+                    }
+
+                  if (target_ws)
+                    {
+                      GError *jira_err = NULL;
+                      sc_jira_post_comment (cloud_config->jira.email,
+                        cloud_config->jira.api_token, target_ws,
+                        issue_key,
+                        cloud_config->presets.bug_evidence
+                          ? cloud_config->presets.bug_evidence : "Recording",
+                        "", public_url, is_video, &jira_err);
+                      if (jira_err)
+                        {
+                          GtkWidget *warn = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                            "Jira post failed: %s", jira_err->message);
+                          gtk_dialog_run (GTK_DIALOG (warn));
+                          gtk_widget_destroy (warn);
+                          g_error_free (jira_err);
+                        }
+                      else
+                        {
+                          GtkClipboard *clip = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
+                          gtk_clipboard_set_text (clip, public_url, -1);
+
+                          GtkWidget *info = gtk_message_dialog_new (NULL,
+                            GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                            "Posted to %s!\n\n%s\n\n(URL copied to clipboard)",
+                            issue_key, public_url);
+                          gtk_dialog_run (GTK_DIALOG (info));
+                          gtk_widget_destroy (info);
+                        }
                     }
                 }
               else
                 {
+                  gboolean is_video = url_is_video (public_url);
                   screenshooter_jira_dialog_run (NULL, cloud_config,
-                                                  public_url);
+                                                  public_url, is_video);
                 }
             }
           else
