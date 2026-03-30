@@ -104,6 +104,61 @@ sc_cloud_config_load (const gchar *config_dir, GError **error)
   config->jira.api_token = ht_take_string (ht, "api_token");
   g_hash_table_destroy (ht);
 
+  /* Auto-migrate old single-workspace format */
+  {
+    gchar *old_base_url = g_key_file_get_string (kf, "jira", "base_url", NULL);
+    if (old_base_url && old_base_url[0] != '\0')
+      {
+        gchar *old_project = g_key_file_get_string (kf, "jira", "default_project", NULL);
+
+        /* Extract label from URL: https://myteam.atlassian.net -> myteam */
+        gchar *label = NULL;
+        {
+          gchar *stripped = strip_toml_quotes (g_strdup (old_base_url));
+          const gchar *host_start = strstr (stripped, "://");
+          if (host_start)
+            host_start += 3;
+          else
+            host_start = stripped;
+          const gchar *dot = strchr (host_start, '.');
+          if (dot)
+            label = g_strndup (host_start, dot - host_start);
+          else
+            label = g_strdup (host_start);
+          g_free (stripped);
+        }
+
+        /* Write migrated workspace group into the GKeyFile in memory */
+        gchar *group = g_strdup_printf ("jira.workspace.%s", label);
+        gchar *clean_url = strip_toml_quotes (g_strdup (old_base_url));
+        gchar *clean_project = old_project ? strip_toml_quotes (g_strdup (old_project)) : g_strdup ("");
+        g_key_file_set_string (kf, group, "base_url", clean_url);
+        g_key_file_set_string (kf, group, "default_project", clean_project);
+        g_free (clean_url);
+        g_free (clean_project);
+        g_free (group);
+
+        /* Remove old keys from [jira] */
+        g_key_file_remove_key (kf, "jira", "base_url", NULL);
+        g_key_file_remove_key (kf, "jira", "default_project", NULL);
+
+        /* Save migrated file */
+        {
+          gchar *data = g_key_file_to_data (kf, NULL, NULL);
+          g_file_set_contents (path, data, -1, NULL);
+          g_free (data);
+        }
+
+        g_free (label);
+        g_free (old_base_url);
+        g_free (old_project);
+      }
+    else
+      {
+        g_free (old_base_url);
+      }
+  }
+
   /* Load workspaces from [jira.workspace.*] groups */
   {
     gchar **groups = g_key_file_get_groups (kf, NULL);

@@ -154,6 +154,61 @@ test_save_and_load_multi_workspace (void)
 }
 
 
+static void
+test_auto_migrate_old_format (void)
+{
+  gchar *dir = create_temp_dir ();
+  gchar *path = sc_cloud_config_get_path (dir);
+  GError *error = NULL;
+
+  /* Write old single-workspace format */
+  const gchar *content =
+    "[jira]\n"
+    "base_url=https://myteam.atlassian.net\n"
+    "email=user@example.com\n"
+    "api_token=tok123\n"
+    "default_project=PROJ\n"
+    "\n"
+    "[r2]\n"
+    "account_id=acct\n"
+    "access_key_id=key\n"
+    "secret_access_key=secret\n"
+    "bucket=mybucket\n"
+    "public_url=https://assets.example.com\n";
+
+  g_mkdir_with_parents (dir, 0700);
+  g_file_set_contents (path, content, -1, &error);
+  g_assert_no_error (error);
+
+  /* Load should auto-migrate */
+  CloudConfig *config = sc_cloud_config_load (dir, &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (config);
+
+  g_assert_cmpstr (config->jira.email, ==, "user@example.com");
+  g_assert_cmpstr (config->jira.api_token, ==, "tok123");
+  g_assert_cmpuint (config->jira.n_workspaces, ==, 1);
+  g_assert_cmpstr (config->jira.workspaces[0].label, ==, "myteam");
+  g_assert_cmpstr (config->jira.workspaces[0].base_url, ==,
+                   "https://myteam.atlassian.net");
+  g_assert_cmpstr (config->jira.workspaces[0].default_project, ==, "PROJ");
+
+  sc_cloud_config_free (config);
+
+  /* Verify the file was rewritten — reload should still work */
+  config = sc_cloud_config_load (dir, &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (config);
+  g_assert_cmpuint (config->jira.n_workspaces, ==, 1);
+  g_assert_cmpstr (config->jira.workspaces[0].label, ==, "myteam");
+
+  sc_cloud_config_free (config);
+  remove_temp_dir (dir);
+  g_free (path);
+  g_free (dir);
+}
+
+
 int
 main (int argc, char **argv)
 {
@@ -165,6 +220,8 @@ main (int argc, char **argv)
                     test_load_multi_workspace_format);
   g_test_add_func ("/multi-workspace/save-and-load-multi-workspace",
                     test_save_and_load_multi_workspace);
+  g_test_add_func ("/multi-workspace/auto-migrate-old-format",
+                    test_auto_migrate_old_format);
 
   return g_test_run ();
 }
