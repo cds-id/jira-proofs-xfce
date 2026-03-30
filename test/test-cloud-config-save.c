@@ -39,14 +39,16 @@ test_save_and_load_round_trip (void)
   config = sc_cloud_config_create_default ();
 
   /* Fill in values */
-  g_free (config->jira.base_url);
-  config->jira.base_url = g_strdup ("https://test.atlassian.net");
   g_free (config->jira.email);
   config->jira.email = g_strdup ("user@example.com");
   g_free (config->jira.api_token);
   config->jira.api_token = g_strdup ("token123");
-  g_free (config->jira.default_project);
-  config->jira.default_project = g_strdup ("TEST");
+
+  config->jira.n_workspaces = 1;
+  config->jira.workspaces = g_new0 (JiraWorkspace, 1);
+  config->jira.workspaces[0].label = g_strdup ("test");
+  config->jira.workspaces[0].base_url = g_strdup ("https://test.atlassian.net");
+  config->jira.workspaces[0].default_project = g_strdup ("TEST");
 
   g_free (config->r2.account_id);
   config->r2.account_id = g_strdup ("acct-id");
@@ -73,10 +75,11 @@ test_save_and_load_round_trip (void)
   g_assert_nonnull (loaded);
   g_assert_true (loaded->loaded);
 
-  g_assert_cmpstr (loaded->jira.base_url, ==, "https://test.atlassian.net");
   g_assert_cmpstr (loaded->jira.email, ==, "user@example.com");
   g_assert_cmpstr (loaded->jira.api_token, ==, "token123");
-  g_assert_cmpstr (loaded->jira.default_project, ==, "TEST");
+  g_assert_cmpuint (loaded->jira.n_workspaces, ==, 1);
+  g_assert_cmpstr (loaded->jira.workspaces[0].base_url, ==, "https://test.atlassian.net");
+  g_assert_cmpstr (loaded->jira.workspaces[0].default_project, ==, "TEST");
 
   g_assert_cmpstr (loaded->r2.account_id, ==, "acct-id");
   g_assert_cmpstr (loaded->r2.access_key_id, ==, "access-key");
@@ -105,8 +108,13 @@ test_save_preserves_presets (void)
 
   /* First save: include presets */
   config = sc_cloud_config_create_default ();
-  g_free (config->jira.base_url);
-  config->jira.base_url = g_strdup ("https://test.atlassian.net");
+  g_free (config->jira.email);
+  config->jira.email = g_strdup ("user@example.com");
+  config->jira.n_workspaces = 1;
+  config->jira.workspaces = g_new0 (JiraWorkspace, 1);
+  config->jira.workspaces[0].label = g_strdup ("test");
+  config->jira.workspaces[0].base_url = g_strdup ("https://test.atlassian.net");
+  config->jira.workspaces[0].default_project = g_strdup ("TEST");
   g_free (config->presets.bug_evidence);
   config->presets.bug_evidence = g_strdup ("My Bug Preset");
   g_free (config->presets.work_evidence);
@@ -119,8 +127,13 @@ test_save_preserves_presets (void)
 
   /* Second save: empty presets (should preserve existing) */
   config = sc_cloud_config_create_default ();
-  g_free (config->jira.base_url);
-  config->jira.base_url = g_strdup ("https://updated.atlassian.net");
+  g_free (config->jira.email);
+  config->jira.email = g_strdup ("user@example.com");
+  config->jira.n_workspaces = 1;
+  config->jira.workspaces = g_new0 (JiraWorkspace, 1);
+  config->jira.workspaces[0].label = g_strdup ("test");
+  config->jira.workspaces[0].base_url = g_strdup ("https://updated.atlassian.net");
+  config->jira.workspaces[0].default_project = g_strdup ("TEST");
   /* presets are empty strings from create_default */
 
   ok = sc_cloud_config_save (config, dir, &error);
@@ -133,7 +146,7 @@ test_save_preserves_presets (void)
   g_assert_no_error (error);
   g_assert_nonnull (loaded);
 
-  g_assert_cmpstr (loaded->jira.base_url, ==, "https://updated.atlassian.net");
+  g_assert_cmpstr (loaded->jira.workspaces[0].base_url, ==, "https://updated.atlassian.net");
   g_assert_cmpstr (loaded->presets.bug_evidence, ==, "My Bug Preset");
   g_assert_cmpstr (loaded->presets.work_evidence, ==, "My Work Preset");
 
@@ -153,8 +166,13 @@ test_config_exists (void)
   g_assert_false (sc_cloud_config_exists (dir));
 
   config = sc_cloud_config_create_default ();
-  g_free (config->jira.base_url);
-  config->jira.base_url = g_strdup ("https://test.atlassian.net");
+  g_free (config->jira.email);
+  config->jira.email = g_strdup ("user@example.com");
+  config->jira.n_workspaces = 1;
+  config->jira.workspaces = g_new0 (JiraWorkspace, 1);
+  config->jira.workspaces[0].label = g_strdup ("test");
+  config->jira.workspaces[0].base_url = g_strdup ("https://test.atlassian.net");
+  config->jira.workspaces[0].default_project = g_strdup ("TEST");
 
   sc_cloud_config_save (config, dir, &error);
   g_assert_no_error (error);
