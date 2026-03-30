@@ -98,13 +98,56 @@ sc_cloud_config_load (const gchar *config_dir, GError **error)
 
   config = g_new0 (CloudConfig, 1);
 
+  /* Load shared jira credentials */
   ht = parse_toml_section (kf, "jira");
-  /* TODO Task 2: load multi-workspace jira config */
   config->jira.email = ht_take_string (ht, "email");
   config->jira.api_token = ht_take_string (ht, "api_token");
-  config->jira.workspaces = NULL;
-  config->jira.n_workspaces = 0;
   g_hash_table_destroy (ht);
+
+  /* Load workspaces from [jira.workspace.*] groups */
+  {
+    gchar **groups = g_key_file_get_groups (kf, NULL);
+    GPtrArray *ws_arr = g_ptr_array_new ();
+    const gchar *prefix = "jira.workspace.";
+    gsize prefix_len = strlen (prefix);
+
+    for (gint i = 0; groups[i] != NULL; i++)
+      {
+        if (g_str_has_prefix (groups[i], prefix))
+          {
+            const gchar *label = groups[i] + prefix_len;
+            JiraWorkspace ws;
+            GHashTable *ws_ht = parse_toml_section (kf, groups[i]);
+
+            ws.label = g_strdup (label);
+            ws.base_url = ht_take_string (ws_ht, "base_url");
+            ws.default_project = ht_take_string (ws_ht, "default_project");
+            g_hash_table_destroy (ws_ht);
+
+            JiraWorkspace *ws_copy = g_new (JiraWorkspace, 1);
+            *ws_copy = ws;
+            g_ptr_array_add (ws_arr, ws_copy);
+          }
+      }
+
+    config->jira.n_workspaces = ws_arr->len;
+    if (ws_arr->len > 0)
+      {
+        config->jira.workspaces = g_new (JiraWorkspace, ws_arr->len);
+        for (guint i = 0; i < ws_arr->len; i++)
+          {
+            config->jira.workspaces[i] = *(JiraWorkspace *) ws_arr->pdata[i];
+            g_free (ws_arr->pdata[i]);
+          }
+      }
+    else
+      {
+        config->jira.workspaces = NULL;
+      }
+
+    g_ptr_array_free (ws_arr, TRUE);
+    g_strfreev (groups);
+  }
 
   ht = parse_toml_section (kf, "r2");
   config->r2.account_id = ht_take_string (ht, "account_id");
@@ -153,10 +196,40 @@ sc_cloud_config_save (const CloudConfig *config, const gchar *config_dir,
   if (g_file_test (path, G_FILE_TEST_EXISTS))
     g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, NULL);
 
-  /* Overwrite [jira] section */
-  /* TODO Task 2: save multi-workspace jira config */
-  g_key_file_set_string (kf, "jira", "email", config->jira.email ? config->jira.email : "");
-  g_key_file_set_string (kf, "jira", "api_token", config->jira.api_token ? config->jira.api_token : "");
+  /* Remove old-style jira keys if present */
+  g_key_file_remove_key (kf, "jira", "base_url", NULL);
+  g_key_file_remove_key (kf, "jira", "default_project", NULL);
+
+  /* Remove all existing [jira.workspace.*] groups */
+  {
+    gchar **groups = g_key_file_get_groups (kf, NULL);
+    for (gint i = 0; groups[i] != NULL; i++)
+      {
+        if (g_str_has_prefix (groups[i], "jira.workspace."))
+          g_key_file_remove_group (kf, groups[i], NULL);
+      }
+    g_strfreev (groups);
+  }
+
+  /* Write shared credentials */
+  g_key_file_set_string (kf, "jira", "email",
+                         config->jira.email ? config->jira.email : "");
+  g_key_file_set_string (kf, "jira", "api_token",
+                         config->jira.api_token ? config->jira.api_token : "");
+
+  /* Write each workspace */
+  for (gsize i = 0; i < config->jira.n_workspaces; i++)
+    {
+      gchar *group = g_strdup_printf ("jira.workspace.%s",
+                                       config->jira.workspaces[i].label);
+      g_key_file_set_string (kf, group, "base_url",
+                             config->jira.workspaces[i].base_url
+                               ? config->jira.workspaces[i].base_url : "");
+      g_key_file_set_string (kf, group, "default_project",
+                             config->jira.workspaces[i].default_project
+                               ? config->jira.workspaces[i].default_project : "");
+      g_free (group);
+    }
 
   /* Overwrite [r2] section */
   g_key_file_set_string (kf, "r2", "account_id", config->r2.account_id ? config->r2.account_id : "");
