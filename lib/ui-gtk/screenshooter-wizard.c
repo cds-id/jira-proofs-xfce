@@ -38,16 +38,26 @@ typedef struct {
   GtkWidget *r2_public_url;
   GtkWidget *r2_result_label;
 
-  /* Jira entries */
-  GtkWidget *jira_base_url;
+  /* Jira credentials */
   GtkWidget *jira_email;
   GtkWidget *jira_api_token;
-  GtkWidget *jira_default_project;
   GtkWidget *jira_result_label;
+
+  /* Jira workspaces */
+  GtkWidget *jira_ws_list_box;
+  GPtrArray *jira_ws_entries;
 
   /* Summary label */
   GtkWidget *summary_label;
 } WizardData;
+
+
+typedef struct {
+  GtkWidget *label_entry;
+  GtkWidget *url_entry;
+  GtkWidget *project_entry;
+  GtkWidget *row;
+} WizardWorkspaceEntry;
 
 
 
@@ -70,13 +80,25 @@ has_r2_config (WizardData *wd)
 static gboolean
 has_jira_config (WizardData *wd)
 {
-  const gchar *base_url  = gtk_entry_get_text (GTK_ENTRY (wd->jira_base_url));
   const gchar *email     = gtk_entry_get_text (GTK_ENTRY (wd->jira_email));
   const gchar *api_token = gtk_entry_get_text (GTK_ENTRY (wd->jira_api_token));
 
-  return (base_url && *base_url &&
-          email && *email &&
-          api_token && *api_token);
+  if (!email || !*email || !api_token || !*api_token)
+    return FALSE;
+
+  if (wd->jira_ws_entries->len == 0)
+    return FALSE;
+
+  for (guint i = 0; i < wd->jira_ws_entries->len; i++)
+    {
+      WizardWorkspaceEntry *e = g_ptr_array_index (wd->jira_ws_entries, i);
+      const gchar *label = gtk_entry_get_text (GTK_ENTRY (e->label_entry));
+      const gchar *url   = gtk_entry_get_text (GTK_ENTRY (e->url_entry));
+      if (!label || !*label || !url || !*url)
+        return FALSE;
+    }
+
+  return TRUE;
 }
 
 
@@ -98,15 +120,24 @@ build_config_from_entries (WizardData *wd)
   config->r2.bucket            = g_strdup (gtk_entry_get_text (GTK_ENTRY (wd->r2_bucket)));
   config->r2.public_url        = g_strdup (gtk_entry_get_text (GTK_ENTRY (wd->r2_public_url)));
 
-  g_free (config->jira.base_url);
   g_free (config->jira.email);
   g_free (config->jira.api_token);
-  g_free (config->jira.default_project);
 
-  config->jira.base_url        = g_strdup (gtk_entry_get_text (GTK_ENTRY (wd->jira_base_url)));
-  config->jira.email           = g_strdup (gtk_entry_get_text (GTK_ENTRY (wd->jira_email)));
-  config->jira.api_token       = g_strdup (gtk_entry_get_text (GTK_ENTRY (wd->jira_api_token)));
-  config->jira.default_project = g_strdup (gtk_entry_get_text (GTK_ENTRY (wd->jira_default_project)));
+  config->jira.email     = g_strdup (gtk_entry_get_text (GTK_ENTRY (wd->jira_email)));
+  config->jira.api_token = g_strdup (gtk_entry_get_text (GTK_ENTRY (wd->jira_api_token)));
+
+  config->jira.n_workspaces = wd->jira_ws_entries->len;
+  config->jira.workspaces = g_new0 (JiraWorkspace, wd->jira_ws_entries->len);
+  for (guint i = 0; i < wd->jira_ws_entries->len; i++)
+    {
+      WizardWorkspaceEntry *e = g_ptr_array_index (wd->jira_ws_entries, i);
+      config->jira.workspaces[i].label =
+        g_strdup (gtk_entry_get_text (GTK_ENTRY (e->label_entry)));
+      config->jira.workspaces[i].base_url =
+        g_strdup (gtk_entry_get_text (GTK_ENTRY (e->url_entry)));
+      config->jira.workspaces[i].default_project =
+        g_strdup (gtk_entry_get_text (GTK_ENTRY (e->project_entry)));
+    }
 
   config->loaded = TRUE;
 
@@ -165,12 +196,26 @@ cb_r2_test_connection (GtkButton *button, WizardData *wd)
 static void
 cb_jira_test_connection (GtkButton *button, WizardData *wd)
 {
-  CloudConfig *config;
+  const gchar *email = gtk_entry_get_text (GTK_ENTRY (wd->jira_email));
+  const gchar *api_token = gtk_entry_get_text (GTK_ENTRY (wd->jira_api_token));
   GError *error = NULL;
-  gboolean success;
+  gboolean success = FALSE;
 
-  config = build_config_from_entries (wd);
-  success = sc_jira_test_connection (config, &error);
+  if (wd->jira_ws_entries->len > 0)
+    {
+      WizardWorkspaceEntry *e = g_ptr_array_index (wd->jira_ws_entries, 0);
+      JiraWorkspace ws = {
+        .label = (gchar *) gtk_entry_get_text (GTK_ENTRY (e->label_entry)),
+        .base_url = (gchar *) gtk_entry_get_text (GTK_ENTRY (e->url_entry)),
+        .default_project = (gchar *) gtk_entry_get_text (GTK_ENTRY (e->project_entry)),
+      };
+      success = sc_jira_test_connection (email, api_token, &ws, &error);
+    }
+  else
+    {
+      g_set_error (&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                   "Add at least one workspace first");
+    }
 
   if (success)
     {
@@ -186,8 +231,6 @@ cb_jira_test_connection (GtkButton *button, WizardData *wd)
       g_free (markup);
       g_clear_error (&error);
     }
-
-  sc_cloud_config_free (config);
 }
 
 
@@ -345,25 +388,103 @@ create_r2_page (WizardData *wd)
 
 
 
+static void
+add_workspace_row (WizardData *wd, const gchar *label,
+                   const gchar *url, const gchar *project)
+{
+  WizardWorkspaceEntry *e = g_new0 (WizardWorkspaceEntry, 1);
+
+  GtkWidget *hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+
+  e->label_entry = gtk_entry_new ();
+  gtk_entry_set_placeholder_text (GTK_ENTRY (e->label_entry), "label");
+  gtk_entry_set_width_chars (GTK_ENTRY (e->label_entry), 10);
+  if (label)
+    gtk_entry_set_text (GTK_ENTRY (e->label_entry), label);
+
+  e->url_entry = gtk_entry_new ();
+  gtk_entry_set_placeholder_text (GTK_ENTRY (e->url_entry), "https://team.atlassian.net");
+  gtk_widget_set_hexpand (e->url_entry, TRUE);
+  if (url)
+    gtk_entry_set_text (GTK_ENTRY (e->url_entry), url);
+
+  e->project_entry = gtk_entry_new ();
+  gtk_entry_set_placeholder_text (GTK_ENTRY (e->project_entry), "PROJ");
+  gtk_entry_set_width_chars (GTK_ENTRY (e->project_entry), 8);
+  if (project)
+    gtk_entry_set_text (GTK_ENTRY (e->project_entry), project);
+
+  gtk_box_pack_start (GTK_BOX (hbox), e->label_entry, FALSE, FALSE, 0);
+  gtk_box_pack_start (GTK_BOX (hbox), e->url_entry, TRUE, TRUE, 0);
+  gtk_box_pack_start (GTK_BOX (hbox), e->project_entry, FALSE, FALSE, 0);
+
+  e->row = gtk_list_box_row_new ();
+  gtk_container_add (GTK_CONTAINER (e->row), hbox);
+  gtk_list_box_insert (GTK_LIST_BOX (wd->jira_ws_list_box), e->row, -1);
+  gtk_widget_show_all (e->row);
+
+  g_ptr_array_add (wd->jira_ws_entries, e);
+}
+
+
+static void
+cb_add_workspace (GtkButton *button, WizardData *wd)
+{
+  add_workspace_row (wd, NULL, NULL, NULL);
+}
+
+
+static void
+cb_remove_workspace (GtkButton *button, WizardData *wd)
+{
+  if (wd->jira_ws_entries->len <= 1)
+    return;
+
+  GtkListBoxRow *selected = gtk_list_box_get_selected_row (
+    GTK_LIST_BOX (wd->jira_ws_list_box));
+  if (selected == NULL)
+    return;
+
+  for (guint i = 0; i < wd->jira_ws_entries->len; i++)
+    {
+      WizardWorkspaceEntry *e = g_ptr_array_index (wd->jira_ws_entries, i);
+      if (e->row == GTK_WIDGET (selected))
+        {
+          gtk_widget_destroy (e->row);
+          g_free (e);
+          g_ptr_array_remove_index (wd->jira_ws_entries, i);
+          break;
+        }
+    }
+}
+
+
 static GtkWidget *
 create_jira_page (WizardData *wd)
 {
-  GtkWidget *grid;
+  GtkWidget *box, *grid, *label, *scrolled, *btn_box, *add_btn, *rm_btn;
   GtkWidget *test_button;
   gint row = 0;
+
+  box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
+  gtk_widget_set_margin_start (box, 12);
+  gtk_widget_set_margin_end (box, 12);
+  gtk_widget_set_margin_top (box, 12);
+  gtk_widget_set_margin_bottom (box, 12);
+
+  /* Credentials section */
+  label = gtk_label_new (NULL);
+  gtk_label_set_markup (GTK_LABEL (label), "<b>Credentials</b>");
+  gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+  gtk_box_pack_start (GTK_BOX (box), label, FALSE, FALSE, 0);
 
   grid = gtk_grid_new ();
   gtk_grid_set_row_spacing (GTK_GRID (grid), 6);
   gtk_grid_set_column_spacing (GTK_GRID (grid), 12);
-  gtk_widget_set_margin_start (grid, 12);
-  gtk_widget_set_margin_end (grid, 12);
-  gtk_widget_set_margin_top (grid, 12);
-  gtk_widget_set_margin_bottom (grid, 12);
+  gtk_box_pack_start (GTK_BOX (box), grid, FALSE, FALSE, 0);
 
-  add_grid_entry (GTK_GRID (grid), row++, _("Base URL:"),            &wd->jira_base_url,        TRUE);
-  add_grid_entry (GTK_GRID (grid), row++, _("Email:"),               &wd->jira_email,           TRUE);
-  add_grid_entry (GTK_GRID (grid), row++, _("API Token:"),           &wd->jira_api_token,       FALSE);
-  add_grid_entry (GTK_GRID (grid), row++, _("Default Project Key:"), &wd->jira_default_project, TRUE);
+  add_grid_entry (GTK_GRID (grid), row++, _("Email:"),     &wd->jira_email,     TRUE);
+  add_grid_entry (GTK_GRID (grid), row++, _("API Token:"), &wd->jira_api_token, FALSE);
 
   test_button = gtk_button_new_with_label (_("Test Connection"));
   gtk_grid_attach (GTK_GRID (grid), test_button, 0, row, 1, 1);
@@ -372,9 +493,41 @@ create_jira_page (WizardData *wd)
   gtk_label_set_xalign (GTK_LABEL (wd->jira_result_label), 0.0);
   gtk_grid_attach (GTK_GRID (grid), wd->jira_result_label, 1, row, 1, 1);
 
-  g_signal_connect (test_button, "clicked", G_CALLBACK (cb_jira_test_connection), wd);
+  g_signal_connect (test_button, "clicked",
+                    G_CALLBACK (cb_jira_test_connection), wd);
 
-  return grid;
+  /* Workspaces section */
+  label = gtk_label_new (NULL);
+  gtk_label_set_markup (GTK_LABEL (label), "<b>Workspaces</b>");
+  gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+  gtk_widget_set_margin_top (label, 8);
+  gtk_box_pack_start (GTK_BOX (box), label, FALSE, FALSE, 0);
+
+  scrolled = gtk_scrolled_window_new (NULL, NULL);
+  gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
+    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_min_content_height (
+    GTK_SCROLLED_WINDOW (scrolled), 120);
+  gtk_widget_set_vexpand (scrolled, TRUE);
+  gtk_box_pack_start (GTK_BOX (box), scrolled, TRUE, TRUE, 0);
+
+  wd->jira_ws_list_box = gtk_list_box_new ();
+  gtk_list_box_set_selection_mode (GTK_LIST_BOX (wd->jira_ws_list_box),
+    GTK_SELECTION_SINGLE);
+  gtk_container_add (GTK_CONTAINER (scrolled), wd->jira_ws_list_box);
+
+  btn_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+  gtk_box_pack_start (GTK_BOX (box), btn_box, FALSE, FALSE, 0);
+
+  add_btn = gtk_button_new_with_label (_("Add"));
+  rm_btn = gtk_button_new_with_label (_("Remove"));
+  gtk_box_pack_start (GTK_BOX (btn_box), add_btn, FALSE, FALSE, 0);
+  gtk_box_pack_start (GTK_BOX (btn_box), rm_btn, FALSE, FALSE, 0);
+
+  g_signal_connect (add_btn, "clicked", G_CALLBACK (cb_add_workspace), wd);
+  g_signal_connect (rm_btn, "clicked", G_CALLBACK (cb_remove_workspace), wd);
+
+  return box;
 }
 
 
@@ -404,6 +557,7 @@ screenshooter_wizard_run (GtkWindow *parent, const gchar *config_dir)
   wd.config_dir = config_dir;
   wd.completed  = FALSE;
   wd.loop       = g_main_loop_new (NULL, FALSE);
+  wd.jira_ws_entries = g_ptr_array_new ();
 
   wd.assistant = GTK_ASSISTANT (gtk_assistant_new ());
   gtk_window_set_title (GTK_WINDOW (wd.assistant), _("Screenshooter Setup Wizard"));
@@ -448,8 +602,49 @@ screenshooter_wizard_run (GtkWindow *parent, const gchar *config_dir)
   g_signal_connect (wd.assistant, "destroy", G_CALLBACK (cb_wizard_destroy), &wd);
 
   gtk_widget_show_all (GTK_WIDGET (wd.assistant));
+
+  /* Pre-populate from existing config if available */
+  {
+    GError *load_err = NULL;
+    CloudConfig *existing = sc_cloud_config_load (config_dir, &load_err);
+    if (existing)
+      {
+        if (existing->jira.email[0] != '\0')
+          gtk_entry_set_text (GTK_ENTRY (wd.jira_email), existing->jira.email);
+        if (existing->jira.api_token[0] != '\0')
+          gtk_entry_set_text (GTK_ENTRY (wd.jira_api_token), existing->jira.api_token);
+
+        for (gsize i = 0; i < existing->jira.n_workspaces; i++)
+          add_workspace_row (&wd, existing->jira.workspaces[i].label,
+                             existing->jira.workspaces[i].base_url,
+                             existing->jira.workspaces[i].default_project);
+
+        if (existing->r2.account_id[0] != '\0')
+          gtk_entry_set_text (GTK_ENTRY (wd.r2_account_id), existing->r2.account_id);
+        if (existing->r2.access_key_id[0] != '\0')
+          gtk_entry_set_text (GTK_ENTRY (wd.r2_access_key_id), existing->r2.access_key_id);
+        if (existing->r2.secret_access_key[0] != '\0')
+          gtk_entry_set_text (GTK_ENTRY (wd.r2_secret_access_key), existing->r2.secret_access_key);
+        if (existing->r2.bucket[0] != '\0')
+          gtk_entry_set_text (GTK_ENTRY (wd.r2_bucket), existing->r2.bucket);
+        if (existing->r2.public_url[0] != '\0')
+          gtk_entry_set_text (GTK_ENTRY (wd.r2_public_url), existing->r2.public_url);
+
+        sc_cloud_config_free (existing);
+      }
+    g_clear_error (&load_err);
+  }
+
+  /* Ensure at least one workspace row */
+  if (wd.jira_ws_entries->len == 0)
+    add_workspace_row (&wd, NULL, NULL, NULL);
+
   g_main_loop_run (wd.loop);
   g_main_loop_unref (wd.loop);
+
+  for (guint i = 0; i < wd.jira_ws_entries->len; i++)
+    g_free (g_ptr_array_index (wd.jira_ws_entries, i));
+  g_ptr_array_free (wd.jira_ws_entries, TRUE);
 
   return wd.completed;
 }
