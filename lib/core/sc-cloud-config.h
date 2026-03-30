@@ -4,10 +4,16 @@
 #include <glib.h>
 
 typedef struct {
+  gchar *label;
   gchar *base_url;
+  gchar *default_project;
+} JiraWorkspace;
+
+typedef struct {
   gchar *email;
   gchar *api_token;
-  gchar *default_project;
+  JiraWorkspace *workspaces;
+  gsize n_workspaces;
 } JiraCloudConfig;
 
 typedef struct {

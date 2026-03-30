@@ -99,10 +99,11 @@ sc_cloud_config_load (const gchar *config_dir, GError **error)
   config = g_new0 (CloudConfig, 1);
 
   ht = parse_toml_section (kf, "jira");
-  config->jira.base_url = ht_take_string (ht, "base_url");
+  /* TODO Task 2: load multi-workspace jira config */
   config->jira.email = ht_take_string (ht, "email");
   config->jira.api_token = ht_take_string (ht, "api_token");
-  config->jira.default_project = ht_take_string (ht, "default_project");
+  config->jira.workspaces = NULL;
+  config->jira.n_workspaces = 0;
   g_hash_table_destroy (ht);
 
   ht = parse_toml_section (kf, "r2");
@@ -153,10 +154,9 @@ sc_cloud_config_save (const CloudConfig *config, const gchar *config_dir,
     g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, NULL);
 
   /* Overwrite [jira] section */
-  g_key_file_set_string (kf, "jira", "base_url", config->jira.base_url ? config->jira.base_url : "");
+  /* TODO Task 2: save multi-workspace jira config */
   g_key_file_set_string (kf, "jira", "email", config->jira.email ? config->jira.email : "");
   g_key_file_set_string (kf, "jira", "api_token", config->jira.api_token ? config->jira.api_token : "");
-  g_key_file_set_string (kf, "jira", "default_project", config->jira.default_project ? config->jira.default_project : "");
 
   /* Overwrite [r2] section */
   g_key_file_set_string (kf, "r2", "account_id", config->r2.account_id ? config->r2.account_id : "");
@@ -190,10 +190,15 @@ sc_cloud_config_free (CloudConfig *config)
   if (config == NULL)
     return;
 
-  g_free (config->jira.base_url);
   g_free (config->jira.email);
   g_free (config->jira.api_token);
-  g_free (config->jira.default_project);
+  for (gsize i = 0; i < config->jira.n_workspaces; i++)
+    {
+      g_free (config->jira.workspaces[i].label);
+      g_free (config->jira.workspaces[i].base_url);
+      g_free (config->jira.workspaces[i].default_project);
+    }
+  g_free (config->jira.workspaces);
 
   g_free (config->r2.account_id);
   g_free (config->r2.access_key_id);
@@ -213,10 +218,10 @@ sc_cloud_config_create_default (void)
 {
   CloudConfig *config = g_new0 (CloudConfig, 1);
 
-  config->jira.base_url = g_strdup ("");
   config->jira.email = g_strdup ("");
   config->jira.api_token = g_strdup ("");
-  config->jira.default_project = g_strdup ("");
+  config->jira.workspaces = NULL;
+  config->jira.n_workspaces = 0;
 
   config->r2.account_id = g_strdup ("");
   config->r2.access_key_id = g_strdup ("");
@@ -251,8 +256,16 @@ sc_cloud_config_valid_jira (const CloudConfig *config)
 {
   if (config == NULL || !config->loaded)
     return FALSE;
-  return (config->jira.base_url[0] != '\0' &&
-          config->jira.email[0] != '\0' &&
-          config->jira.api_token[0] != '\0' &&
-          config->jira.default_project[0] != '\0');
+  if (config->jira.email[0] == '\0' ||
+      config->jira.api_token[0] == '\0')
+    return FALSE;
+  if (config->jira.n_workspaces == 0)
+    return FALSE;
+  for (gsize i = 0; i < config->jira.n_workspaces; i++)
+    {
+      if (config->jira.workspaces[i].base_url == NULL ||
+          config->jira.workspaces[i].base_url[0] == '\0')
+        return FALSE;
+    }
+  return TRUE;
 }
