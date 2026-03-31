@@ -242,7 +242,7 @@ cb_wizard_prepare (GtkAssistant *assistant, GtkWidget *page, WizardData *wd)
   gint num_pages    = gtk_assistant_get_n_pages (assistant);
 
   /* Update summary on the last page */
-  if (current_page == num_pages - 1)
+  if (num_pages > 0 && current_page >= 0 && current_page == num_pages - 1)
     update_summary (wd);
 }
 
